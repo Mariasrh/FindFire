@@ -1,4 +1,8 @@
 .env
-data/*.csv
-__pycache__/
 venv/
+.venv/
+__pycache__/
+*.egg-info/
+data/**/*.csv
+!data/fire_stations.csv
+.pytest_cache/
