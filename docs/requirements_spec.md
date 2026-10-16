@@ -1,0 +1,1 @@
+- EUMETSAT MTG Active Fire Monitoring (EO:EUM:DAT:0682): fast, frequent detection
