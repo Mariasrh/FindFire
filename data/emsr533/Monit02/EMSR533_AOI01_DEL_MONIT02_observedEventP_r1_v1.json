@@ -1,0 +1,10 @@
+{
+"type": "FeatureCollection",
+"name": "EMSR533_AOI01_DEL_MONIT02_observedEventP_r1_v1",
+"features": [
+{ "type": "Feature", "properties": { "event_type": "8-Wildfire", "obj_desc": "Forest Fire", "det_method": "Photo-interpretation", "notation": "Active Flames", "dmg_src_id": 5 }, "geometry": { "type": "Point", "coordinates": [ 4.672048597000071, 36.683393289000037 ] } },
+{ "type": "Feature", "properties": { "event_type": "8-Wildfire", "obj_desc": "Forest Fire", "det_method": "Photo-interpretation", "notation": "Active Flames", "dmg_src_id": 5 }, "geometry": { "type": "Point", "coordinates": [ 4.075027940000041, 36.571966825000061 ] } },
+{ "type": "Feature", "properties": { "event_type": "8-Wildfire", "obj_desc": "Forest Fire", "det_method": "Photo-interpretation", "notation": "Active Flames", "dmg_src_id": 5 }, "geometry": { "type": "Point", "coordinates": [ 4.069039609000072, 36.575225573000068 ] } },
+{ "type": "Feature", "properties": { "event_type": "8-Wildfire", "obj_desc": "Forest Fire", "det_method": "Photo-interpretation", "notation": "Active Flames", "dmg_src_id": 5 }, "geometry": { "type": "Point", "coordinates": [ 4.884984587000076, 36.790273357000046 ] } }
+]
+}
