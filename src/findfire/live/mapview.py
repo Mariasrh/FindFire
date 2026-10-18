@@ -19,7 +19,7 @@ def render(zones, hotspots, alerts, banner: str, path, refresh_s: int = 120):
     w, s, e, n = STUDY_BBOX
     m = folium.Map(tiles=None, control_scale=True)
     folium.TileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-                 attr="Tiles &copy; Esri", name="Street map", overlay=False).add_to(m)
+                     attr="Tiles &copy; Esri", name="Street map", overlay=False).add_to(m)   # OSM's public tiles block this kind of use
     folium.TileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                      attr="Esri", name="Satellite", overlay=False, show=False).add_to(m)
     m.fit_bounds([[s, w], [n, e]])

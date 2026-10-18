@@ -34,3 +34,8 @@ LINK_GAP_M = 750         # two hotspots are linked when the gap between their pi
 LINK_GAP_PIXELS = 2.0    # ... or <= this many pixel widths (= up to two missed pixels in a row), whichever is larger
 CORE_MIN_NEIGHBORS = 1   # DBSCAN-style core rule: 1 = any linked pair forms a cluster, 2-3 = resists chaining
 REDETECTION_H = 3.0      # same pixel seen by another satellite within this many hours = one observation
+
+# ---------------------------------------------------------------- Zone footprint
+FOOTPRINT_METHOD = "alpha"   # "alpha" (FEDS-style alpha shape) | "close" (morphological closing) | "boxes" (pixels only)
+ALPHA_SCALE = 1.5            # alpha shape radius = this x mean nearest-neighbour distance of the zone's hotspots
+EDGE_FRACTION = 0.5          # footprint = alpha shape of pixel centres buffered by this x half pixel (1 = full pixel)

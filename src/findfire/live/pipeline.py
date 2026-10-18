@@ -13,7 +13,7 @@ from sklearn.neighbors import BallTree
 from findfire.config import CORE_MIN_NEIGHBORS
 from findfire.detection.filters import apply_exclusions, hours_since_epoch, mark_redetections
 from findfire.zones.clustering import cluster_hotspots
-from findfire.zones.geometry import zone_geometry
+from findfire.zones.footprint import zone_footprint
 
 R = 6371008.8
 CONF = {"l": 0, "n": 1, "h": 2}
@@ -36,7 +36,7 @@ def build_zones(viirs: pd.DataFrame, now: pd.Timestamp, exclusions=None, min_nei
     v["zone_id"] = cluster_hotspots(v, min_neighbors=min_neighbors)
     zones = []
     for zid, g in v[v.zone_id >= 0].groupby("zone_id"):
-        geom, area, per = zone_geometry(g.longitude.values, g.latitude.values, g.scan.values, g.track.values)
+        geom, area, per = zone_footprint(g.longitude.values, g.latitude.values, g.scan.values, g.track.values)
         first, last = g.acq_dt.min(), g.acq_dt.max()
         status = "new" if first > now - NEW_FOR else "active" if last > now - INACTIVE else "inactive"
         prim = g[g.dup_of == -1]
