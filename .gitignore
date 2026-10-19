@@ -6,3 +6,8 @@ __pycache__/
 data/**/*.csv
 !data/fire_stations.csv
 .pytest_cache/
+data/live/
+data/raw/
+data/archive/
+data/results/
+*.nc

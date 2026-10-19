@@ -13,3 +13,4 @@ xarray
 netCDF4
 eumdac
 pytest
+pyresample
