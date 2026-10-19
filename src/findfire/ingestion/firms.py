@@ -1,46 +1,92 @@
-"""Fetch active fire detections over Algeria from NASA FIRMS."""
+"""NASA FIRMS VIIRS hotspots: fetch (NRT or archive), load a CSV, normalise.
+
+Nothing here falls back to fake data: a bad key, an empty answer or a source that is not available yet
+raises, so a demo can never silently run on synthetic points.
+"""
+from __future__ import annotations
+
+import datetime as dt
 import io
-from pathlib import Path
+import time
 
 import pandas as pd
 import requests
 
-from findfire.config import ALGERIA_BBOX, FIRMS_MAP_KEY
+from findfire.config import FIRMS_MAP_KEY, FIRMS_NRT_SOURCES, MIN_CONFIDENCE, STUDY_BBOX
 
-BASE_URL = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
-DEFAULT_SOURCE = "VIIRS_NOAA20_NRT"  # VIIRS, 375 m resolution
-RAW_DIR = Path("data/raw")
-
-
-def fetch_fires(source: str = DEFAULT_SOURCE, days: int = 1) -> pd.DataFrame:
-    """Return fire detections inside the Algeria bounding box for the last `days` days."""
-    if not FIRMS_MAP_KEY:
-        raise RuntimeError("FIRMS_MAP_KEY is missing. Check your .env file.")
-
-    bbox = ",".join(str(v) for v in ALGERIA_BBOX)
-    url = f"{BASE_URL}/{FIRMS_MAP_KEY}/{source}/{bbox}/{days}"
-    response = requests.get(url, timeout=60)
-    if not response.ok:
-        raise RuntimeError(f"FIRMS error {response.status_code}: {response.text[:300]}")
-
-    fires = pd.read_csv(io.StringIO(response.text))
-    if "latitude" not in fires.columns:
-        # FIRMS returns a plain-text error message when something is wrong
-        raise RuntimeError(f"Unexpected FIRMS response: {response.text[:200]}")
-    return fires
+BASE = "https://firms.modaps.eosdis.nasa.gov/api"
+CONF_RANK = {"l": 0, "n": 1, "h": 2}
 
 
-def save_raw(fires: pd.DataFrame, name: str = "firms_algeria.csv") -> Path:
-    """Save raw detections to data/raw (ignored by Git)."""
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    path = RAW_DIR / name
-    fires.to_csv(path, index=False)
-    return path
+def _get(url: str, retries: int = 3) -> str:
+    for attempt in range(retries):
+        r = requests.get(url, timeout=60)
+        if r.status_code < 500:
+            r.raise_for_status()
+            return r.text
+        time.sleep(2 ** attempt)
+    r.raise_for_status()
+    return r.text
 
 
-if __name__ == "__main__":
-    fires = fetch_fires(days=2)
-    print(f"{len(fires)} hotspots detected in the Algeria area (last 2 days)")
-    if not fires.empty:
-        print(fires[["latitude", "longitude", "acq_date", "acq_time", "confidence"]].head())
-    print(f"Saved to {save_raw(fires)}")
+def fetch_area(source: str, bbox=STUDY_BBOX, days: int = 1, start: dt.date | None = None,
+               key: str = FIRMS_MAP_KEY) -> pd.DataFrame:
+    """One request: up to 5 days. `start=None` means the most recent `days` days (NRT behaviour)."""
+    if not key:
+        raise RuntimeError("FIRMS_MAP_KEY is not set (.env)")
+    if not 1 <= days <= 5:
+        raise ValueError("FIRMS area API allows 1 to 5 days per request")
+    w, s, e, n = bbox
+    url = f"{BASE}/area/csv/{key}/{source}/{w},{s},{e},{n}/{days}" + (f"/{start:%Y-%m-%d}" if start else "")
+    text = _get(url)
+    if not text.startswith("latitude"):          # FIRMS answers errors (bad key, bad source) as plain text
+        raise RuntimeError(f"FIRMS refused the request for {source}: {text[:200]!r}")
+    df = pd.read_csv(io.StringIO(text))
+    df["source"] = source
+    return df
+
+
+def fetch_recent(sources=FIRMS_NRT_SOURCES, bbox=STUDY_BBOX, days: int = 2) -> pd.DataFrame:
+    """Latest NRT detections from every satellite. This is what the live demo polls."""
+    frames = [fetch_area(s, bbox, days) for s in sources]
+    return prepare(pd.concat(frames, ignore_index=True))
+
+
+def fetch_range(sources, start: dt.date, end: dt.date, bbox=STUDY_BBOX) -> pd.DataFrame:
+    """Date range (inclusive), 5 days per request. Use *_SP sources for old events, *_NRT for the last weeks."""
+    frames = []
+    for source in sources:
+        cur = start
+        while cur <= end:
+            n = min(5, (end - cur).days + 1)
+            frames.append(fetch_area(source, bbox, n, cur))
+            cur += dt.timedelta(days=n)
+            time.sleep(0.5)
+    return prepare(pd.concat(frames, ignore_index=True))
+
+
+def availability(key: str = FIRMS_MAP_KEY, sensor: str = "ALL") -> pd.DataFrame:
+    """Date range each product currently covers. Check it before asking for an old event."""
+    return pd.read_csv(io.StringIO(_get(f"{BASE}/data_availability/csv/{key}/{sensor}")))
+
+
+def load_csv(path) -> pd.DataFrame:
+    """A FIRMS CSV saved earlier (data/raw/*.csv)."""
+    return prepare(pd.read_csv(path))
+
+
+def prepare(raw: pd.DataFrame, min_confidence: str | None = MIN_CONFIDENCE) -> pd.DataFrame:
+    """UTC timestamp, confidence filter, exact duplicates removed, pixel size columns guaranteed."""
+    d = raw.copy()
+    hhmm = d["acq_time"].astype(int).astype(str).str.zfill(4)
+    d["acq_dt"] = pd.to_datetime(d["acq_date"].astype(str) + " " + hhmm, format="%Y-%m-%d %H%M", utc=True)
+    d["confidence"] = d["confidence"].astype(str).str.lower().str[0]
+    if min_confidence:
+        d = d[d["confidence"].map(CONF_RANK).fillna(-1) >= CONF_RANK[min_confidence]]
+    for c in ("scan", "track"):
+        if c not in d:
+            d[c] = 0.375
+    if "satellite" not in d:
+        d["satellite"] = ""
+    d = d.drop_duplicates(subset=["latitude", "longitude", "acq_dt", "satellite"])
+    return d.sort_values("acq_dt").reset_index(drop=True)
