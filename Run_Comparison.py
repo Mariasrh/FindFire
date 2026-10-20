@@ -11,6 +11,6 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent
 sys.path.insert(0, str(root / "src"))
-if len(sys.argv) == 1:
+if not any(a.split("=", 1)[0] in ("--csv", "--event") for a in sys.argv[1:]):
     sys.argv += ["--event", "2021-08-08", "2021-08-16"]
 runpy.run_path(str(root / "scripts" / "validate_emsr.py"), run_name="__main__")
