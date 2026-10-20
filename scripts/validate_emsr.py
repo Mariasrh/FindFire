@@ -23,6 +23,8 @@ a.add_argument("--csv", help="a saved FIRMS CSV")
 a.add_argument("--event", nargs=2, metavar=("START", "END"), help="FIRMS archive event, YYYY-MM-DD YYYY-MM-DD")
 a.add_argument("--step-hours", type=float, default=12); a.add_argument("--window-days", type=float, default=7)
 a.add_argument("--link-hours", type=float, default=72); a.add_argument("--min-neighbors", type=int, default=1)
+a.add_argument("--min-zone-ha", type=float, default=0.0,
+               help="ignore zones smaller than this many hectares when comparing (validation only)")
 a.add_argument("--out", default=str(DATA_DIR / "results"))
 a = a.parse_args()
 
@@ -40,4 +42,4 @@ res = run_tracking(viirs, None, load_exclusions(), step=pd.Timedelta(hours=a.ste
                    min_neighbors=a.min_neighbors)
 print(f"{len(viirs)} hotspots in the study box | {len(res['steps'])} steps | "
       f"{len(res['snaps'][-1]['zones']) if res['snaps'] else 0} zones at the end")
-validate(res, source, last_data=viirs.acq_dt.max(), out=Path(a.out))
+validate(res, source, last_data=viirs.acq_dt.max(), out=Path(a.out), min_zone_ha=a.min_zone_ha)

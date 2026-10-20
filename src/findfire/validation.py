@@ -49,9 +49,13 @@ def step_for(obs, step_times):
     return steps[-1]
 
 
-def zones_at(snaps, step) -> gpd.GeoDataFrame:
-    """Our zones at one tracking step as a lon/lat GeoDataFrame (`snaps` = run_tracking(...)["snaps"])."""
+def zones_at(snaps, step, min_zone_ha=0.0) -> gpd.GeoDataFrame:
+    """Our zones at one tracking step as a lon/lat GeoDataFrame (`snaps` = run_tracking(...)["snaps"]).
+
+    Zones smaller than `min_zone_ha` hectares are dropped. This is a validation-only minimum mapping unit: small
+    fires still matter for live alerts, but they are mostly noise when scoring the burned-area extent."""
     zones = next((s["zones"] for s in snaps if s["time"] == step), [])
+    zones = [z for z in zones if z["area_ha"] >= min_zone_ha]
     return gpd.GeoDataFrame([dict(zone_id=z["zone_id"], status=z["status"], area_ha=z["area_ha"],
                                   geometry=z["geometry"]) for z in zones], geometry="geometry", crs=4326)
 
@@ -70,7 +74,7 @@ def compare(ref, aoi, zones) -> dict:
                 iou=inter / union if union else np.nan)
 
 
-def _plots(results, refs, snaps, out):
+def _plots(results, refs, snaps, out, min_zone_ha=0.0):
     """Two-panel agreement/area chart plus an overlay of our zones on the last product's reference."""
     fig, ax = plt.subplots(1, 2, figsize=(13, 4.2))
     x = np.arange(len(results)); w = 0.25
@@ -86,7 +90,7 @@ def _plots(results, refs, snaps, out):
     fig.savefig(out / "emsr_metrics.png", dpi=150, bbox_inches="tight")
 
     name = results["product"].iloc[-1]; ref, aoi = refs[name]
-    z_in = gpd.clip(zones_at(snaps, results["step"].iloc[-1]), aoi)      # only zones inside the AOI
+    z_in = gpd.clip(zones_at(snaps, results["step"].iloc[-1], min_zone_ha), aoi)   # only zones inside the AOI
     fig2, ax2 = plt.subplots(figsize=(8, 7))
     ref.plot(ax=ax2, color="#2a78d6", alpha=0.35, edgecolor="#2a78d6", linewidth=0.5)
     z_in.plot(ax=ax2, color="#f4a261", alpha=0.45, edgecolor="#e63946", linewidth=1)
@@ -101,11 +105,12 @@ def _plots(results, refs, snaps, out):
     plt.close("all")
 
 
-def validate(res, source="FIRMS", last_data=None, out=None):
+def validate(res, source="FIRMS", last_data=None, out=None, min_zone_ha=0.0):
     """Compare our tracked zones with every EMSR533 product; print the table and save CSV + PNGs.
 
     `res` is the run_tracking(...) result. Each product is compared at the first 12 h step at or after its
-    observation time. Returns the results DataFrame, or None if nothing could be compared.
+    observation time. Zones smaller than `min_zone_ha` hectares are ignored (validation-only minimum mapping unit).
+    Returns the results DataFrame, or None if nothing could be compared.
     """
     if source and "synthetic" in source.lower():
         print("EMSR validation needs real FIRMS data; this run is synthetic, skipping.")
@@ -125,19 +130,20 @@ def validate(res, source="FIRMS", last_data=None, out=None):
         ref, aoi = load_product(name); refs[name] = (ref, aoi)
         step = step_for(obs, step_times)
         rows.append(dict(product=name, observed=obs, step=step, ref_official_ha=OFFICIAL_HA.get(name),
-                         **compare(ref, aoi, zones_at(snaps, step))))
+                         **compare(ref, aoi, zones_at(snaps, step, min_zone_ha))))
     if not rows:
         print("No validation possible: no EMSR533 folders found under data/emsr533/")
         return None
     results = pd.DataFrame(rows).round({c: 2 for c in ["ref_ha", "zones_ha", "recall", "precision", "iou"]})
     results["ref_ok"] = ((results.ref_ha / results.ref_official_ha) - 1).abs() < 0.01   # matches the official area
-    print(f"\nValidation against Copernicus EMS (EMSR533), data: {source}")
+    print(f"\nValidation against Copernicus EMS (EMSR533), data: {source}"
+          + (f" | zones >= {min_zone_ha:g} ha" if min_zone_ha else ""))
     print(results.select_dtypes(exclude=["datetime64[ns, UTC]"]).round(2).to_string(index=False))
     if not results.ref_ok.all():
         print("CHECK: ref_ok=False means the loaded files do not match the official burnt area "
               "(wrong folder or missing AOI?).")
     results.to_csv(out / "emsr_validation.csv", index=False)
-    _plots(results, refs, snaps, out)
+    _plots(results, refs, snaps, out, min_zone_ha)
     name = results["product"].iloc[-1]
     print(f"saved: {out / 'emsr_validation.csv'}, {out / 'emsr_metrics.png'}, {out / f'emsr_overlay_{name}.png'}")
     return results

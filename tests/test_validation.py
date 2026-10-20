@@ -62,6 +62,18 @@ def test_zones_at_builds_a_lonlat_geodataframe_for_the_step():
     assert z.zone_id.iloc[0] == 1 and z.area_ha.iloc[0] == 12.5
 
 
+def test_zones_at_drops_zones_below_the_minimum_area():
+    t = pd.Timestamp("2021-08-12 12:00", tz="UTC")
+    snaps = [dict(time=t, zones=[
+        dict(zone_id=1, status="active", area_ha=5.0, geometry=box(4.0, 36.0, 4.01, 36.01)),
+        dict(zone_id=2, status="active", area_ha=50.0, geometry=box(4.0, 36.0, 4.1, 36.1)),
+    ])]
+    assert len(zones_at(snaps, t, min_zone_ha=10)) == 1
+    assert zones_at(snaps, t, min_zone_ha=10).zone_id.iloc[0] == 2
+    assert len(zones_at(snaps, t, min_zone_ha=50)) == 1          # >= keeps the zone on the threshold
+    assert zones_at(snaps, t).zone_id.tolist() == [1, 2]
+
+
 def test_load_product_reports_a_missing_product_folder():
     with pytest.raises(FileNotFoundError):
         load_product("no_such_product")
