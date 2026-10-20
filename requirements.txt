@@ -5,6 +5,8 @@ python-dotenv
 scikit-learn
 shapely
 pyproj
+geopandas
+matplotlib
 folium
 streamlit
 streamlit-folium
