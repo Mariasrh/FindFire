@@ -10,4 +10,5 @@ data/live/
 data/raw/
 data/archive/
 data/results/
+data/emsr533/
 *.nc
