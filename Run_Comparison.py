@@ -1,9 +1,9 @@
-"""Run the EMSR533 validation with no arguments: `python main.py` (or press Run in your IDE).
+"""Run the EMSR533 validation with no arguments: `python Run_Comparison.py` (or press Run in your IDE).
 
 Defaults to the August 2021 Kabylie event (the only event with EMSR533 reference maps). Extra arguments are passed
 through to scripts/validate_emsr.py, e.g.:
 
-    python main.py --csv data/raw/firms_kabylie.csv     # offline, no API call
+    python Run_Comparison.py --csv data/raw/firms_kabylie.csv     # offline, no API call
 """
 import runpy
 import sys
