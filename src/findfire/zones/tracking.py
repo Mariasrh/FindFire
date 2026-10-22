@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from findfire.config import ALPHA_SCALE, CORE_MIN_NEIGHBORS, EDGE_FRACTION, FOOTPRINT_METHOD
-from findfire.detection.filters import apply_exclusions, mark_redetections
+from findfire.detection.filters import apply_exclusions, mark_redetections, vegetation_only
 from findfire.live.pipeline import INACTIVE, NEW_FOR, build_alerts
 from findfire.zones.clustering import cluster_hotspots
 from findfire.zones.footprint import zone_footprint
@@ -29,6 +29,7 @@ def run_tracking(viirs: pd.DataFrame, mtg: pd.DataFrame | None = None, exclusion
                  min_neighbors: int = CORE_MIN_NEIGHBORS, footprint: str = FOOTPRINT_METHOD,
                  alpha_scale: float = ALPHA_SCALE, edge_fraction: float = EDGE_FRACTION):
     v = apply_exclusions(viirs, exclusions) if exclusions is not None and len(viirs) else viirs
+    v = vegetation_only(v)                     # keep only presumed vegetation fires when `type` is available
     v = mark_redetections(v.reset_index(drop=True)).sort_values("acq_dt")
     if v.empty:
         return dict(steps=[], snaps=[], merges=[])

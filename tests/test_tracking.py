@@ -41,3 +41,9 @@ def test_lone_hotspot_creates_no_zone_and_hotspot_is_in_the_step():
 def test_two_satellites_one_flare_is_no_zone():
     v = pd.concat([hs([(0, 0)], sat="N20"), hs([(0.03, 0)], sat="SNPP", minutes=50)], ignore_index=True)
     assert all(not s["zones"] for s in run_tracking(v)["snaps"])
+
+
+def test_run_tracking_ignores_non_vegetation_hotspots():
+    industrial = blob(0, 0).assign(type=2)                     # a dense cluster, but a static land source
+    assert all(not s["zones"] for s in run_tracking(industrial)["snaps"])
+    assert run_tracking(blob(0, 0).assign(type=0))["snaps"][-1]["zones"]

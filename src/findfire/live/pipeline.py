@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.neighbors import BallTree
 
 from findfire.config import CORE_MIN_NEIGHBORS
-from findfire.detection.filters import apply_exclusions, hours_since_epoch, mark_redetections
+from findfire.detection.filters import apply_exclusions, hours_since_epoch, mark_redetections, vegetation_only
 from findfire.zones.clustering import cluster_hotspots
 from findfire.zones.footprint import zone_footprint
 
@@ -22,9 +22,13 @@ WINDOW_H = 12.0
 
 
 def _clean(df, exclusions):
+    """Apply the shared false-alarm filters: curated exclusion circles, then non-vegetation heat sources.
+
+    `vegetation_only` is a no-op when the source has no `type` column (e.g. MTG, FIRMS NRT)."""
     if df.empty:
         return df
-    return apply_exclusions(df, exclusions) if exclusions is not None else df
+    d = apply_exclusions(df, exclusions) if exclusions is not None else df
+    return vegetation_only(d)
 
 
 def build_zones(viirs: pd.DataFrame, now: pd.Timestamp, exclusions=None, min_neighbors=CORE_MIN_NEIGHBORS):

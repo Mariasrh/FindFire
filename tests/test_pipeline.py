@@ -25,6 +25,11 @@ def test_viirs_cluster_becomes_zone_with_area():
     assert len(zones) == 1 and zones[0]["area_ha"] > 5 and zones[0]["status"] in {"new", "active"}
 
 
+def test_build_zones_ignores_non_vegetation_hotspots():
+    zones, _, _, _ = build_state(fire(180).assign(type=2), mtg([], []), NOW)
+    assert zones == []
+
+
 def test_mtg_alert_confirmed_by_viirs_with_lead_time():
     m = mtg([(0.5, 0.5)] * 3, [0, 10, 20])
     _, _, alerts, _ = build_state(fire(180), m, NOW)
