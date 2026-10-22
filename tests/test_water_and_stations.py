@@ -1,0 +1,49 @@
+import pandas as pd
+
+from findfire.stations.nearest_station import haversine_km, nearest_stations, plan_response
+from findfire.water.water_demand import compute_water_demand, severity_from_area
+
+
+def test_bigger_fire_needs_more_water():
+    small = compute_water_demand(10, "forest")
+    big = compute_water_demand(100, "forest")
+    assert big.volume_l > small.volume_l > 0
+
+
+def test_severity_levels():
+    assert severity_from_area(5) == "low"
+    assert severity_from_area(50) == "medium"
+    assert severity_from_area(500) == "critical"
+
+
+def test_strong_wind_increases_demand():
+    calm = compute_water_demand(50, "scrub", wind_kmh=5)
+    windy = compute_water_demand(50, "scrub", wind_kmh=40)
+    assert windy.flow_l_min > calm.flow_l_min
+
+
+def test_unknown_terrain_raises():
+    try:
+        compute_water_demand(10, "ice")
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError")
+
+
+def test_haversine_algiers_oran():
+    assert 340 < haversine_km(36.75, 3.06, 35.70, -0.63) < 365
+
+
+def test_nearest_station_and_plan():
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    close = nearest_stations(36.71, 4.05, stations, n=1)
+    assert close.iloc[0]["wilaya"] == "Tizi Ouzou"
+    plan = plan_response(36.71, 4.05, volume_l=20_000, stations=stations)
+    assert plan["loads_needed"] == 5
+    assert plan["unmet_loads"] == 0
+
+
+def test_huge_demand_needs_reinforcement():
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    plan = plan_response(36.71, 4.05, volume_l=10_000_000, stations=stations)
+    assert plan["needs_reinforcement"] is True
