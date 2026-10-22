@@ -35,11 +35,13 @@ elif a.event:
     viirs, source = firms.fetch_range(FIRMS_SP_SOURCES, s, e), f"FIRMS archive {s} to {e}"
 else:
     a.error("give --csv (offline) or --event START END (FIRMS archive)")
+dropped = int(getattr(viirs, "attrs", {}).get("non_vegetation_dropped", 0))
 w, s_, e_, n = STUDY_BBOX
 viirs = viirs[viirs.latitude.between(s_, n) & viirs.longitude.between(w, e_)].reset_index(drop=True)
 res = run_tracking(viirs, None, load_exclusions(), step=pd.Timedelta(hours=a.step_hours),
                    window=pd.Timedelta(days=a.window_days), link_dt=pd.Timedelta(hours=a.link_hours),
                    min_neighbors=a.min_neighbors)
 print(f"{len(viirs)} hotspots in the study box | {len(res['steps'])} steps | "
-      f"{len(res['snaps'][-1]['zones']) if res['snaps'] else 0} zones at the end")
+      f"{len(res['snaps'][-1]['zones']) if res['snaps'] else 0} zones at the end"
+      + (f" | {dropped} non-vegetation hotspots dropped" if dropped else ""))
 validate(res, source, last_data=viirs.acq_dt.max(), out=Path(a.out), min_zone_ha=a.min_zone_ha)

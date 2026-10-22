@@ -25,6 +25,12 @@ FIRMS_NRT_SOURCES = ["VIIRS_NOAA20_NRT", "VIIRS_SNPP_NRT", "VIIRS_NOAA21_NRT"]
 FIRMS_SP_SOURCES = ["VIIRS_NOAA20_SP", "VIIRS_SNPP_SP"]
 MIN_CONFIDENCE = "n"            # VIIRS classes: l < n < h
 
+# ---------------------------------------------------------------- False-alarm filters
+# Keep only FIRMS `type == 0` (presumed vegetation fire): drops volcanoes (1), other static land sources
+# such as gas flares, refineries and industry (2), and offshore detections (3). The field only exists in the
+# standard-quality products and saved CSVs, not in NRT, so live NRT rows pass through unchanged.
+VEGETATION_ONLY = os.getenv("FINDFIRE_VEGETATION_ONLY", "1").lower() not in ("0", "false", "no")
+
 # ---------------------------------------------------------------- EUMETSAT MTG
 MTG_FIR_COLLECTION = "EO:EUM:DAT:0682"   # FCI L2 Active Fire Monitoring (netCDF), 2 km, 10 min, pre-operational
 

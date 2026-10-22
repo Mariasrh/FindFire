@@ -27,9 +27,11 @@ def log(msg): print(f"[{utcnow():%H:%M:%S}Z] {msg}", flush=True)
 
 
 def poll_firms(store, days=2):
-    new = store.add("viirs", firms.fetch_recent(days=days))
+    new = firms.fetch_recent(days=days)
+    dropped = int(getattr(new, "attrs", {}).get("non_vegetation_dropped", 0))
+    added = store.add("viirs", new)
     store.set_watermarks(firms_last_ok=utcnow().isoformat())
-    log(f"FIRMS: {new} new detections")
+    log(f"FIRMS: {added} new detections" + (f" ({dropped} industrial/offshore dropped)" if dropped else ""))
 
 
 def poll_mtg(store, backfill_h):

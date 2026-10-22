@@ -6,6 +6,12 @@
 - Source used: VIIRS_NOAA20_NRT (375 m resolution)
 - Role: precise hotspot location and area
 - Access: area API with Algeria bounding box, MAP_KEY in .env
+- `type` field (standard-quality/archive products and saved CSVs only):
+  0 = presumed vegetation fire, 1 = active volcano, 2 = other static land source
+  (gas flares, refineries, industry), 3 = offshore.
+  Near-real-time (NRT) data has no `type`, so the vegetation-only filter
+  (`findfire.detection.filters.vegetation_only`, on by default via the `VEGETATION_ONLY` flag)
+  applies to archive and saved-CSV runs only; live NRT passes through unchanged.
 
 ### EUMETSAT Data Store
 - Collection used: EO:EUM:DAT:0682, Active Fire Monitoring (netCDF), MTG

@@ -54,6 +54,25 @@ def mark_redetections(df: pd.DataFrame, hours: float = REDETECTION_H) -> pd.Data
     return d.loc[df.index]
 
 
+VEGETATION_TYPE = 0          # FIRMS `type`: 0 vegetation, 1 volcano, 2 other static land source, 3 offshore
+
+
+def vegetation_only(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only presumed vegetation fires (FIRMS `type` == 0).
+
+    Drops active volcanoes (1), other static land sources such as gas flares, refineries and industry (2) and
+    offshore detections (3). The column only exists in the standard-quality products (VNP14IMGT, *_SP archive,
+    saved CSVs); near-real-time (NRT) rows have no `type` and pass through unchanged, as do unknown (NaN) values.
+    The number of rows removed is recorded in `df.attrs["non_vegetation_dropped"]`."""
+    if "type" not in df.columns or df.empty:
+        return df
+    t = pd.to_numeric(df["type"], errors="coerce")
+    keep = (t == VEGETATION_TYPE) | t.isna()
+    out = df[keep].copy()
+    out.attrs["non_vegetation_dropped"] = int((~keep).sum())
+    return out
+
+
 def load_exclusions(path=None) -> pd.DataFrame:
     """data/exclusion_zones.csv with columns name, latitude, longitude, radius_km (kept in git, edited by hand)."""
     p = path or DATA_DIR / "exclusion_zones.csv"
