@@ -1,0 +1,9 @@
+name,wilaya,latitude,longitude,trucks,truck_capacity_l
+SAMPLE Algiers,Alger,36.75,3.06,10,4000
+SAMPLE Blida,Blida,36.47,2.83,6,4000
+SAMPLE Tizi Ouzou,Tizi Ouzou,36.71,4.05,6,4000
+SAMPLE Bejaia,Bejaia,36.75,5.08,5,4000
+SAMPLE Setif,Setif,36.19,5.41,5,4000
+SAMPLE Constantine,Constantine,36.37,6.61,6,4000
+SAMPLE Annaba,Annaba,36.90,7.77,5,4000
+SAMPLE Oran,Oran,35.70,-0.63,8,4000
