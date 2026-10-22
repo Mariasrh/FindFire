@@ -1,7 +1,7 @@
 import pandas as pd
 
-from findfire.detection.filters import (apply_exclusions, assign_pass, build_static_mask, mark_redetections,
-                                        persistence, vegetation_only)
+from findfire.detection.filters import (apply_exclusions, assign_pass, build_static_mask, load_exclusions,
+                                        mark_redetections, persistence, vegetation_only)
 from conftest import hs
 
 
@@ -69,3 +69,20 @@ def test_vegetation_only_keeps_rows_with_unknown_type():
 def test_vegetation_only_is_a_noop_without_the_type_column():
     d = hs([(0, 0), (1, 0)])
     assert len(vegetation_only(d)) == 2
+
+
+def test_load_exclusions_merges_static_sources_only_when_asked(tmp_path, monkeypatch):
+    import findfire.detection.filters as f
+    monkeypatch.setattr(f, "DATA_DIR", tmp_path)
+    pd.DataFrame([dict(name="refinery", latitude=36.0, longitude=4.0, radius_km=2.0)]).to_csv(
+        tmp_path / "exclusion_zones.csv", index=False)
+    pd.DataFrame([dict(name="static", latitude=35.0, longitude=5.0, radius_km=1.5, days_seen=30)]).to_csv(
+        tmp_path / "static_sources.csv", index=False)
+    assert list(load_exclusions().name) == ["refinery"]                    # history/validation: curated only
+    assert sorted(load_exclusions(include_static=True).name) == ["refinery", "static"]
+
+
+def test_load_exclusions_is_empty_without_files(tmp_path, monkeypatch):
+    import findfire.detection.filters as f
+    monkeypatch.setattr(f, "DATA_DIR", tmp_path)
+    assert load_exclusions(include_static=True).empty

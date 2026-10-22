@@ -30,6 +30,12 @@ def test_build_zones_ignores_non_vegetation_hotspots():
     assert zones == []
 
 
+def test_static_mask_removes_flares_without_a_type_column():
+    ex = pd.DataFrame([dict(name="static", latitude=36.0, longitude=4.0, radius_km=1.5)])
+    zones, _, _, _ = build_state(fire(180), mtg([], []), NOW, ex)          # no `type`: the NRT case
+    assert zones == []
+
+
 def test_mtg_alert_confirmed_by_viirs_with_lead_time():
     m = mtg([(0.5, 0.5)] * 3, [0, 10, 20])
     _, _, alerts, _ = build_state(fire(180), m, NOW)

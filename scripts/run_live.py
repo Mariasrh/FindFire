@@ -58,7 +58,7 @@ def rebuild(store, out, viirs_csv=None):
     if len(viirs):
         viirs = viirs[viirs.latitude.between(s_, n) & viirs.longitude.between(w, e)].reset_index(drop=True)
     mtg_df = store.load("mtg")
-    zones, hot, alerts, through = build_state(viirs, mtg_df, now, load_exclusions())
+    zones, hot, alerts, through = build_state(viirs, mtg_df, now, load_exclusions(include_static=True))
     wm = store.watermarks()
     mt = pd.Timestamp(wm["mtg_last_sensing"]) if "mtg_last_sensing" in wm else None
     lat = {"viirs": latency_minutes(viirs), "mtg": latency_minutes(mtg_df)}

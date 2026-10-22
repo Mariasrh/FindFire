@@ -73,13 +73,36 @@ def vegetation_only(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def load_exclusions(path=None) -> pd.DataFrame:
-    """data/exclusion_zones.csv with columns name, latitude, longitude, radius_km (kept in git, edited by hand)."""
-    p = path or DATA_DIR / "exclusion_zones.csv"
+def load_static_sources(path=None) -> pd.DataFrame:
+    """data/static_sources.csv: permanent heat sources (gas flares, refineries, industry) found in SP history.
+
+    Built by scripts/build_static_mask.py. Used only by the live NRT path, where detections have no `type`
+    field; historical runs use the archive's own `type` labels instead."""
+    p = path or DATA_DIR / "static_sources.csv"
     try:
         return pd.read_csv(p)
     except FileNotFoundError:
         return pd.DataFrame(columns=["name", "latitude", "longitude", "radius_km"])
+
+
+def load_exclusions(path=None, include_static: bool = False) -> pd.DataFrame:
+    """data/exclusion_zones.csv with columns name, latitude, longitude, radius_km (kept in git, edited by hand).
+
+    `include_static=True` also loads data/static_sources.csv; use it for live NRT, where hotspots carry no
+    `type` field. Historical/validation runs leave it off so a present-day mask cannot alter past events."""
+    cols = ["name", "latitude", "longitude", "radius_km"]
+    frames = []
+    try:
+        frames.append(pd.read_csv(path or DATA_DIR / "exclusion_zones.csv"))
+    except FileNotFoundError:
+        pass
+    if include_static and path is None:
+        static = load_static_sources()
+        if not static.empty:
+            frames.append(static)
+    if not frames:
+        return pd.DataFrame(columns=cols)
+    return pd.concat(frames, ignore_index=True)
 
 
 def apply_exclusions(df: pd.DataFrame, zones: pd.DataFrame) -> pd.DataFrame:

@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 data/**/*.csv
 !data/fire_stations.csv
+!data/exclusion_zones.csv
+!data/static_sources.csv
 .pytest_cache/
 data/live/
 data/raw/
@@ -12,3 +14,4 @@ data/archive/
 data/results/
 data/emsr533/
 *.nc
+.vscode/
