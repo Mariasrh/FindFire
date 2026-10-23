@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.neighbors import BallTree
 
 from findfire.config import CORE_MIN_NEIGHBORS
-from findfire.detection.filters import apply_exclusions, hours_since_epoch, mark_redetections
+from findfire.detection.filters import apply_exclusions, hours_since_epoch, mark_redetections, vegetation_only
 from findfire.zones.clustering import cluster_hotspots
 from findfire.zones.footprint import zone_footprint
 
@@ -22,9 +22,13 @@ WINDOW_H = 12.0
 
 
 def _clean(df, exclusions):
+    """Apply the shared false-alarm filters: curated exclusion circles, then non-vegetation heat sources.
+
+    `vegetation_only` is a no-op when the source has no `type` column (e.g. MTG, FIRMS NRT)."""
     if df.empty:
         return df
-    return apply_exclusions(df, exclusions) if exclusions is not None else df
+    d = apply_exclusions(df, exclusions) if exclusions is not None else df
+    return vegetation_only(d)
 
 
 def build_zones(viirs: pd.DataFrame, now: pd.Timestamp, exclusions=None, min_neighbors=CORE_MIN_NEIGHBORS):
@@ -94,7 +98,11 @@ def build_state(viirs, mtg, now, exclusions=None, **kw):
 
 def latency_minutes(df: pd.DataFrame):
     """(median, p90) of ingested_at - acq_dt in minutes, or None."""
-    if df.empty or "ingested_at" not in df:
+    if df.empty or "ingested_at" not in df or "acq_dt" not in df:
         return None
-    lat = (df.ingested_at - df.acq_dt) / pd.Timedelta(minutes=1)
+    ingested = pd.to_datetime(df.ingested_at, utc=True, errors="coerce")
+    acquired = pd.to_datetime(df.acq_dt, utc=True, errors="coerce")
+    lat = ((ingested - acquired) / pd.Timedelta(minutes=1)).dropna()
+    if lat.empty:
+        return None
     return float(lat.median()), float(lat.quantile(0.9))

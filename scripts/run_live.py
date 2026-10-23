@@ -27,9 +27,11 @@ def log(msg): print(f"[{utcnow():%H:%M:%S}Z] {msg}", flush=True)
 
 
 def poll_firms(store, days=2):
-    new = store.add("viirs", firms.fetch_recent(days=days))
+    new = firms.fetch_recent(days=days)
+    dropped = int(getattr(new, "attrs", {}).get("non_vegetation_dropped", 0))
+    added = store.add("viirs", new)
     store.set_watermarks(firms_last_ok=utcnow().isoformat())
-    log(f"FIRMS: {new} new detections")
+    log(f"FIRMS: {added} new detections" + (f" ({dropped} industrial/offshore dropped)" if dropped else ""))
 
 
 def poll_mtg(store, backfill_h):
@@ -56,7 +58,7 @@ def rebuild(store, out, viirs_csv=None):
     if len(viirs):
         viirs = viirs[viirs.latitude.between(s_, n) & viirs.longitude.between(w, e)].reset_index(drop=True)
     mtg_df = store.load("mtg")
-    zones, hot, alerts, through = build_state(viirs, mtg_df, now, load_exclusions())
+    zones, hot, alerts, through = build_state(viirs, mtg_df, now, load_exclusions(include_static=True))
     wm = store.watermarks()
     mt = pd.Timestamp(wm["mtg_last_sensing"]) if "mtg_last_sensing" in wm else None
     lat = {"viirs": latency_minutes(viirs), "mtg": latency_minutes(mtg_df)}
@@ -79,6 +81,7 @@ def main():
     a = argparse.ArgumentParser()
     a.add_argument("--once", action="store_true"); a.add_argument("--no-mtg", action="store_true")
     a.add_argument("--no-firms", action="store_true"); a.add_argument("--viirs-csv")
+    a.add_argument("--firms-days", type=int, default=2, help="NRT days to request per poll (1-5)")
     a.add_argument("--mtg-every", type=int, default=150); a.add_argument("--firms-every", type=int, default=600)
     a.add_argument("--backfill-h", type=float, default=3.0); a.add_argument("--out", default=str(DATA_DIR / "live"))
     a = a.parse_args()
@@ -87,7 +90,7 @@ def main():
     while True:
         now, changed = time.time(), False
         for flag, name, due, fn in ((a.no_mtg, "mtg", next_m, lambda: poll_mtg(store, a.backfill_h)),
-                                    (a.no_firms, "firms", next_f, lambda: poll_firms(store))):
+                                    (a.no_firms, "firms", next_f, lambda: poll_firms(store, a.firms_days))):
             if not flag and now >= due:
                 try:
                     fn(); changed = True

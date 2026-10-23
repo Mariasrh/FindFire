@@ -12,7 +12,8 @@ import time
 import pandas as pd
 import requests
 
-from findfire.config import FIRMS_MAP_KEY, FIRMS_NRT_SOURCES, MIN_CONFIDENCE, STUDY_BBOX
+from findfire.config import FIRMS_MAP_KEY, FIRMS_NRT_SOURCES, MIN_CONFIDENCE, STUDY_BBOX, VEGETATION_ONLY
+from findfire.detection.filters import vegetation_only
 
 BASE = "https://firms.modaps.eosdis.nasa.gov/api"
 CONF_RANK = {"l": 0, "n": 1, "h": 2}
@@ -75,18 +76,29 @@ def load_csv(path) -> pd.DataFrame:
     return prepare(pd.read_csv(path))
 
 
-def prepare(raw: pd.DataFrame, min_confidence: str | None = MIN_CONFIDENCE) -> pd.DataFrame:
-    """UTC timestamp, confidence filter, exact duplicates removed, pixel size columns guaranteed."""
+def prepare(raw: pd.DataFrame, min_confidence: str | None = MIN_CONFIDENCE,
+            vegetation: bool = VEGETATION_ONLY) -> pd.DataFrame:
+    """UTC timestamp, confidence filter, exact duplicates removed, pixel size columns guaranteed.
+
+    With `vegetation=True` (default) only presumed vegetation fires are kept when the FIRMS `type` column is
+    present; the number dropped is left in `attrs["non_vegetation_dropped"]`. NRT data has no `type`, so it is
+    returned unchanged."""
     d = raw.copy()
     hhmm = d["acq_time"].astype(int).astype(str).str.zfill(4)
     d["acq_dt"] = pd.to_datetime(d["acq_date"].astype(str) + " " + hhmm, format="%Y-%m-%d %H%M", utc=True)
     d["confidence"] = d["confidence"].astype(str).str.lower().str[0]
     if min_confidence:
         d = d[d["confidence"].map(CONF_RANK).fillna(-1) >= CONF_RANK[min_confidence]]
+    dropped = 0
+    if vegetation:
+        d = vegetation_only(d)
+        dropped = int(d.attrs.get("non_vegetation_dropped", 0))
     for c in ("scan", "track"):
         if c not in d:
             d[c] = 0.375
     if "satellite" not in d:
         d["satellite"] = ""
     d = d.drop_duplicates(subset=["latitude", "longitude", "acq_dt", "satellite"])
-    return d.sort_values("acq_dt").reset_index(drop=True)
+    out = d.sort_values("acq_dt").reset_index(drop=True)
+    out.attrs["non_vegetation_dropped"] = dropped
+    return out

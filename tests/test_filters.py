@@ -1,7 +1,7 @@
 import pandas as pd
 
-from findfire.detection.filters import (apply_exclusions, assign_pass, build_static_mask, mark_redetections,
-                                        persistence)
+from findfire.detection.filters import (apply_exclusions, assign_pass, build_static_mask, load_exclusions,
+                                        mark_redetections, persistence, vegetation_only)
 from conftest import hs
 
 
@@ -52,3 +52,37 @@ def test_other_satellite_hours_later_is_not_a_duplicate():
 def test_persistence_ignores_detections_outside_the_window():
     d = pd.concat([hs([(0, 0)], sat="N20", minutes=0), hs([(0, 0)], sat="SNPP", minutes=60 * 72)], ignore_index=True)
     assert list(persistence(d, window_h=48)) == [0, 0]
+
+
+def test_vegetation_only_keeps_vegetation_and_drops_static_and_offshore():
+    d = pd.DataFrame(dict(type=[0, 2, 1, 3, 0]))
+    out = vegetation_only(d)
+    assert list(out.index) == [0, 4]
+    assert out.attrs["non_vegetation_dropped"] == 3
+
+
+def test_vegetation_only_keeps_rows_with_unknown_type():
+    d = pd.DataFrame(dict(type=[0, None, 2]))
+    assert list(vegetation_only(d).index) == [0, 1]
+
+
+def test_vegetation_only_is_a_noop_without_the_type_column():
+    d = hs([(0, 0), (1, 0)])
+    assert len(vegetation_only(d)) == 2
+
+
+def test_load_exclusions_merges_static_sources_only_when_asked(tmp_path, monkeypatch):
+    import findfire.detection.filters as f
+    monkeypatch.setattr(f, "DATA_DIR", tmp_path)
+    pd.DataFrame([dict(name="refinery", latitude=36.0, longitude=4.0, radius_km=2.0)]).to_csv(
+        tmp_path / "exclusion_zones.csv", index=False)
+    pd.DataFrame([dict(name="static", latitude=35.0, longitude=5.0, radius_km=1.5, days_seen=30)]).to_csv(
+        tmp_path / "static_sources.csv", index=False)
+    assert list(load_exclusions().name) == ["refinery"]                    # history/validation: curated only
+    assert sorted(load_exclusions(include_static=True).name) == ["refinery", "static"]
+
+
+def test_load_exclusions_is_empty_without_files(tmp_path, monkeypatch):
+    import findfire.detection.filters as f
+    monkeypatch.setattr(f, "DATA_DIR", tmp_path)
+    assert load_exclusions(include_static=True).empty

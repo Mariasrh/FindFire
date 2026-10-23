@@ -25,6 +25,17 @@ def test_viirs_cluster_becomes_zone_with_area():
     assert len(zones) == 1 and zones[0]["area_ha"] > 5 and zones[0]["status"] in {"new", "active"}
 
 
+def test_build_zones_ignores_non_vegetation_hotspots():
+    zones, _, _, _ = build_state(fire(180).assign(type=2), mtg([], []), NOW)
+    assert zones == []
+
+
+def test_static_mask_removes_flares_without_a_type_column():
+    ex = pd.DataFrame([dict(name="static", latitude=36.0, longitude=4.0, radius_km=1.5)])
+    zones, _, _, _ = build_state(fire(180), mtg([], []), NOW, ex)          # no `type`: the NRT case
+    assert zones == []
+
+
 def test_mtg_alert_confirmed_by_viirs_with_lead_time():
     m = mtg([(0.5, 0.5)] * 3, [0, 10, 20])
     _, _, alerts, _ = build_state(fire(180), m, NOW)
@@ -51,6 +62,14 @@ def test_no_viirs_at_all_leaves_alert_pending():
     _, _, a, _ = build_state(hs([]).reindex(columns=["latitude", "longitude", "acq_dt", "scan", "track", "satellite", "frp"]),
                              mtg([(1, 1)] * 2, [0, 10]), NOW)
     assert a.iloc[0].status == "pending"
+
+
+def test_latency_accepts_string_timestamps():
+    d = hs([(0, 0)])
+    d["ingested_at"] = (d.acq_dt + pd.Timedelta(minutes=30)).astype(str)
+    d["acq_dt"] = d.acq_dt.astype(str)
+    med, _ = latency_minutes(d)
+    assert abs(med - 30) < 1e-6
 
 
 def test_store_keeps_first_ingested_time_and_measures_latency(tmp_path):

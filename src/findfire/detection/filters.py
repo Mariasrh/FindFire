@@ -54,13 +54,55 @@ def mark_redetections(df: pd.DataFrame, hours: float = REDETECTION_H) -> pd.Data
     return d.loc[df.index]
 
 
-def load_exclusions(path=None) -> pd.DataFrame:
-    """data/exclusion_zones.csv with columns name, latitude, longitude, radius_km (kept in git, edited by hand)."""
-    p = path or DATA_DIR / "exclusion_zones.csv"
+VEGETATION_TYPE = 0          # FIRMS `type`: 0 vegetation, 1 volcano, 2 other static land source, 3 offshore
+
+
+def vegetation_only(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only presumed vegetation fires (FIRMS `type` == 0).
+
+    Drops active volcanoes (1), other static land sources such as gas flares, refineries and industry (2) and
+    offshore detections (3). The column only exists in the standard-quality products (VNP14IMGT, *_SP archive,
+    saved CSVs); near-real-time (NRT) rows have no `type` and pass through unchanged, as do unknown (NaN) values.
+    The number of rows removed is recorded in `df.attrs["non_vegetation_dropped"]`."""
+    if "type" not in df.columns or df.empty:
+        return df
+    t = pd.to_numeric(df["type"], errors="coerce")
+    keep = (t == VEGETATION_TYPE) | t.isna()
+    out = df[keep].copy()
+    out.attrs["non_vegetation_dropped"] = int((~keep).sum())
+    return out
+
+
+def load_static_sources(path=None) -> pd.DataFrame:
+    """data/static_sources.csv: permanent heat sources (gas flares, refineries, industry) found in SP history.
+
+    Built by scripts/build_static_mask.py. Used only by the live NRT path, where detections have no `type`
+    field; historical runs use the archive's own `type` labels instead."""
+    p = path or DATA_DIR / "static_sources.csv"
     try:
         return pd.read_csv(p)
     except FileNotFoundError:
         return pd.DataFrame(columns=["name", "latitude", "longitude", "radius_km"])
+
+
+def load_exclusions(path=None, include_static: bool = False) -> pd.DataFrame:
+    """data/exclusion_zones.csv with columns name, latitude, longitude, radius_km (kept in git, edited by hand).
+
+    `include_static=True` also loads data/static_sources.csv; use it for live NRT, where hotspots carry no
+    `type` field. Historical/validation runs leave it off so a present-day mask cannot alter past events."""
+    cols = ["name", "latitude", "longitude", "radius_km"]
+    frames = []
+    try:
+        frames.append(pd.read_csv(path or DATA_DIR / "exclusion_zones.csv"))
+    except FileNotFoundError:
+        pass
+    if include_static and path is None:
+        static = load_static_sources()
+        if not static.empty:
+            frames.append(static)
+    if not frames:
+        return pd.DataFrame(columns=cols)
+    return pd.concat(frames, ignore_index=True)
 
 
 def apply_exclusions(df: pd.DataFrame, zones: pd.DataFrame) -> pd.DataFrame:
