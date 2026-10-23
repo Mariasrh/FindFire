@@ -47,3 +47,23 @@ def test_huge_demand_needs_reinforcement():
     stations = pd.read_csv("tests/data/sample_stations.csv")
     plan = plan_response(36.71, 4.05, volume_l=10_000_000, stations=stations)
     assert plan["needs_reinforcement"] is True
+
+def test_demand_is_capped_for_huge_fires():
+    huge = compute_water_demand(5000, "forest")
+    bigger = compute_water_demand(50000, "forest")
+    assert huge.front_attacked_m == bigger.front_attacked_m
+    assert huge.flow_l_min == bigger.flow_l_min
+
+
+def test_small_fire_attacks_the_whole_perimeter():
+    d = compute_water_demand(2, "forest")
+    assert d.front_share == 1.0
+
+
+def test_big_fire_attacks_only_part_of_the_perimeter():
+    d = compute_water_demand(2000, "forest")
+    assert 0 < d.front_share < 1
+
+
+def test_parameters_are_marked_as_unconfirmed():
+    assert "placeholder" in compute_water_demand(10, "forest").parameters_status
