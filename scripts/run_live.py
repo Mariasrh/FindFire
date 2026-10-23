@@ -81,6 +81,7 @@ def main():
     a = argparse.ArgumentParser()
     a.add_argument("--once", action="store_true"); a.add_argument("--no-mtg", action="store_true")
     a.add_argument("--no-firms", action="store_true"); a.add_argument("--viirs-csv")
+    a.add_argument("--firms-days", type=int, default=2, help="NRT days to request per poll (1-5)")
     a.add_argument("--mtg-every", type=int, default=150); a.add_argument("--firms-every", type=int, default=600)
     a.add_argument("--backfill-h", type=float, default=3.0); a.add_argument("--out", default=str(DATA_DIR / "live"))
     a = a.parse_args()
@@ -89,7 +90,7 @@ def main():
     while True:
         now, changed = time.time(), False
         for flag, name, due, fn in ((a.no_mtg, "mtg", next_m, lambda: poll_mtg(store, a.backfill_h)),
-                                    (a.no_firms, "firms", next_f, lambda: poll_firms(store))):
+                                    (a.no_firms, "firms", next_f, lambda: poll_firms(store, a.firms_days))):
             if not flag and now >= due:
                 try:
                     fn(); changed = True
