@@ -57,3 +57,9 @@ def test_no_stations_raises():
 
 def test_empty_zone_list_gives_empty_table():
     assert response_table([], STATIONS).empty
+
+def test_table_is_sorted_by_severity_then_area():
+    zones = [make_zone(1, "active", 5), make_zone(2, "active", 50), make_zone(3, "active", 400)]
+    table = response_table(zones, STATIONS)
+    assert list(table.severity) == ["critical", "medium", "low"]
+    assert list(table.zone_id) == [3, 2, 1]

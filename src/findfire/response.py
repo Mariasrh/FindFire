@@ -77,4 +77,8 @@ def response_table(zones: list[dict], stations: pd.DataFrame, **kw) -> pd.DataFr
     rows = [r for z in zones if (r := response_for_zone(z, stations, **kw)) is not None]
     if not rows:
         return pd.DataFrame(columns=COLUMNS)
-    return pd.DataFrame(rows)[COLUMNS].sort_values("volume_l", ascending=False).reset_index(drop=True)
+    table = pd.DataFrame(rows)[COLUMNS]
+    order = {"critical": 0, "medium": 1, "low": 2}
+    table["_rank"] = table["severity"].map(order)
+    table = table.sort_values(["_rank", "area_ha"], ascending=[True, False], kind="mergesort")
+    return table.drop(columns="_rank").reset_index(drop=True)
