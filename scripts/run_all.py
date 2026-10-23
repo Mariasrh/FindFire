@@ -5,6 +5,7 @@
     python scripts/run_all.py --csv data/raw/firms_algeria.csv   # offline
     python scripts/run_all.py --rebuild-mask          # rebuild static_sources.csv first
     python scripts/run_all.py --replay 2021-08-08 2021-08-14     # also build a historical replay
+    python scripts/run_all.py --validate              # also run the default EMSR533 validation
 """
 from __future__ import annotations
 
@@ -44,6 +45,9 @@ def main() -> None:
     ap.add_argument("--no-debug", action="store_true", help="skip the kept/removed detection map")
     ap.add_argument("--rebuild-mask", action="store_true", help="rebuild data/static_sources.csv first")
     ap.add_argument("--replay", nargs=2, metavar=("START", "END"), help="also build a replay for these dates")
+    ap.add_argument("--validate", action="store_true", help="also run the default EMSR533 validation (Kabylie 2021)")
+    ap.add_argument("--validate-event", nargs=2, metavar=("START", "END"), help="validate a FIRMS archive event")
+    ap.add_argument("--validate-csv", type=Path, help="validate a saved FIRMS CSV")
     ap.add_argument("--open", action="store_true", help="open the generated maps in the browser")
     a = ap.parse_args()
 
@@ -85,6 +89,16 @@ def main() -> None:
     if a.replay:
         run([sys.executable, str(ROOT / "scripts" / "build_replay.py"),
              "--event", *a.replay, "--out", str(DATA_DIR / "replay")], "historical replay")
+
+    if a.validate or a.validate_event or a.validate_csv:
+        validation = [sys.executable, str(ROOT / "scripts" / "validate_emsr.py")]
+        if a.validate_csv:
+            if not a.validate_csv.exists():
+                ap.error(f"validation CSV not found: {a.validate_csv}")
+            validation += ["--csv", str(a.validate_csv.resolve())]
+        elif a.validate_event:
+            validation += ["--event", *a.validate_event]
+        run(validation, "EMSR533 validation")
 
     outputs = [out / "map.html"]
     if wrote_debug:
