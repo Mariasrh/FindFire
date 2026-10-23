@@ -67,3 +67,27 @@ def test_big_fire_attacks_only_part_of_the_perimeter():
 
 def test_parameters_are_marked_as_unconfirmed():
     assert "placeholder" in compute_water_demand(10, "forest").parameters_status
+
+
+def test_trucks_needed_from_flow():
+    from findfire.stations.nearest_station import plan_trucks
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    plan = plan_trucks(36.71, 4.05, flow_l_min=9000, stations=stations, pump_l_min=2000)
+    assert plan["trucks_needed"] == 5
+    assert plan["unmet_trucks"] == 0
+    assert plan["needs_reinforcement"] is False
+
+
+def test_huge_flow_needs_reinforcement_in_trucks():
+    from findfire.stations.nearest_station import plan_trucks
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    plan = plan_trucks(36.71, 4.05, flow_l_min=1_000_000, stations=stations, pump_l_min=2000)
+    assert plan["unmet_trucks"] > 0
+    assert plan["needs_reinforcement"] is True
+
+
+def test_autonomy_is_tank_over_pump_flow():
+    from findfire.stations.nearest_station import plan_trucks
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    plan = plan_trucks(36.71, 4.05, flow_l_min=4000, stations=stations, pump_l_min=2000)
+    assert plan["autonomy_min"] == 2.0

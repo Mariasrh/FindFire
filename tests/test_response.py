@@ -63,3 +63,11 @@ def test_table_is_sorted_by_severity_then_area():
     table = response_table(zones, STATIONS)
     assert list(table.severity) == ["critical", "medium", "low"]
     assert list(table.zone_id) == [3, 2, 1]
+
+
+def test_response_has_simultaneous_trucks_and_autonomy():
+    r = response_for_zone(make_zone(area_ha=100), STATIONS)
+    assert r["trucks_needed_now"] > 0
+    assert r["trucks_sent"] <= r["trucks_needed_now"]
+    assert r["autonomy_min"] > 0
+    assert r["eta_last_truck_min"] >= r["nearest_eta_min"] or r["trucks_sent"] == 0
