@@ -7,6 +7,8 @@ EARTH_RADIUS_KM = 6371.0
 ROAD_FACTOR = 1.3      # road distance is longer than straight distance
 AVG_SPEED_KMH = 50.0   # placeholder average truck speed
 PUMP_L_MIN = 2000.0    # placeholder: water a truck can deliver per minute (TO BE CONFIRMED)
+MAX_ETA_MIN = 60.0       # placeholder: ignore stations further than this (TO BE CONFIRMED)
+SEARCH_STATIONS = 8      # how many nearest stations are considered
 PARAMETERS_STATUS = "placeholder, to be confirmed"
 
 
@@ -58,7 +60,8 @@ def plan_response(lat: float, lon: float, volume_l: float, stations: pd.DataFram
 
 
 def plan_trucks(lat: float, lon: float, flow_l_min: float, stations: pd.DataFrame,
-                n: int = 3, pump_l_min: float = PUMP_L_MIN) -> dict:
+                n: int = SEARCH_STATIONS, pump_l_min: float = PUMP_L_MIN,
+                max_eta_min: float = MAX_ETA_MIN) -> dict:
     """Trucks to engage AT THE SAME TIME to deliver the required flow.
 
     Trucks are taken from the n nearest stations. If they cannot cover the
@@ -67,10 +70,11 @@ def plan_trucks(lat: float, lon: float, flow_l_min: float, stations: pd.DataFram
     truck has to refill.
     """
     close = nearest_stations(lat, lon, stations, n)
+    reachable = close[close["eta_min"] <= max_eta_min]
     needed = math.ceil(flow_l_min / pump_l_min) if flow_l_min > 0 else 0
     remaining = needed
     assignments = []
-    for _, st in close.iterrows():
+    for _, st in reachable.iterrows():
         if remaining <= 0:
             break
         sent = min(int(st["trucks"]), remaining)

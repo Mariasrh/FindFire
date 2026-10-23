@@ -91,3 +91,18 @@ def test_autonomy_is_tank_over_pump_flow():
     stations = pd.read_csv("tests/data/sample_stations.csv")
     plan = plan_trucks(36.71, 4.05, flow_l_min=4000, stations=stations, pump_l_min=2000)
     assert plan["autonomy_min"] == 2.0
+
+
+def test_trucks_come_from_more_than_three_stations():
+    from findfire.stations.nearest_station import plan_trucks
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    plan = plan_trucks(36.71, 4.05, flow_l_min=24000, stations=stations, pump_l_min=2000, max_eta_min=1000)
+    assert plan["trucks_sent"] > 9
+
+
+def test_stations_beyond_the_max_eta_are_ignored():
+    from findfire.stations.nearest_station import plan_trucks
+    stations = pd.read_csv("tests/data/sample_stations.csv")
+    plan = plan_trucks(36.71, 4.05, flow_l_min=24000, stations=stations, pump_l_min=2000, max_eta_min=20)
+    assert all(a["eta_min"] <= 20 for a in plan["assignments"])
+    assert plan["needs_reinforcement"] is True
