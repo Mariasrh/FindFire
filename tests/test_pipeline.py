@@ -64,6 +64,14 @@ def test_no_viirs_at_all_leaves_alert_pending():
     assert a.iloc[0].status == "pending"
 
 
+def test_latency_accepts_string_timestamps():
+    d = hs([(0, 0)])
+    d["ingested_at"] = (d.acq_dt + pd.Timedelta(minutes=30)).astype(str)
+    d["acq_dt"] = d.acq_dt.astype(str)
+    med, _ = latency_minutes(d)
+    assert abs(med - 30) < 1e-6
+
+
 def test_store_keeps_first_ingested_time_and_measures_latency(tmp_path):
     s = Store(tmp_path)
     d = hs([(0, 0)]); d["source"] = "X"

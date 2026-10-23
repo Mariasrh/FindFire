@@ -98,7 +98,11 @@ def build_state(viirs, mtg, now, exclusions=None, **kw):
 
 def latency_minutes(df: pd.DataFrame):
     """(median, p90) of ingested_at - acq_dt in minutes, or None."""
-    if df.empty or "ingested_at" not in df:
+    if df.empty or "ingested_at" not in df or "acq_dt" not in df:
         return None
-    lat = (df.ingested_at - df.acq_dt) / pd.Timedelta(minutes=1)
+    ingested = pd.to_datetime(df.ingested_at, utc=True, errors="coerce")
+    acquired = pd.to_datetime(df.acq_dt, utc=True, errors="coerce")
+    lat = ((ingested - acquired) / pd.Timedelta(minutes=1)).dropna()
+    if lat.empty:
+        return None
     return float(lat.median()), float(lat.quantile(0.9))
