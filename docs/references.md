@@ -23,3 +23,7 @@
   unzipped under data/emsr533/<Product>/ (not in git)
 - https://mapping.emergency.copernicus.eu/activations/EMSR533/
 - Products compared by scripts/validate_emsr.py at each product's observation time
+### Fire stations
+- Positions: OpenStreetMap contributors (ODbL), tag amenity=fire_station, downloaded with scripts/fetch_fire_stations.py.
+- Number of trucks (3) and tank capacity (4000 L) per station are ASSUMED: no public source found.
+- OSM coverage is incomplete and uneven, so some real stations are missing.
