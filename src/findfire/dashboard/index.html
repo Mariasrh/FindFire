@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FindFire dashboard</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e8eaed; --muted:#9aa0a6;
+          --low:#2e7d32; --medium:#f9a825; --critical:#c62828; --accent:#4da3ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0; margin-right:auto; }
+  button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  #meta { color:var(--muted); font-size:13px; }
+  #sample { display:none; background:var(--medium); color:#000; font-weight:600; padding:4px 10px; border-radius:6px; font-size:13px; }
+  #banner { display:none; background:var(--critical); padding:14px 18px; font-size:16px; }
+  #banner .row { display:flex; gap:12px; align-items:center; justify-content:space-between; margin:4px 0; }
+  #notes { padding:0 18px; color:var(--muted); font-size:12px; }
+  #notes div { margin-top:6px; }
+  main { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:14px; padding:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card.new { box-shadow:0 0 0 2px var(--critical); }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .top h2 { margin:0; font-size:17px; }
+  .badge { padding:2px 10px; border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; color:#000; }
+  .low { background:var(--low); color:#fff; } .medium { background:var(--medium); } .critical { background:var(--critical); color:#fff; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:13px; }
+  .grid span { color:var(--muted); display:block; font-size:11px; }
+  .grid b { font-size:14px; }
+  .warn { color:var(--medium); }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:12px; }
+  th, td { text-align:right; padding:3px 4px; border-top:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:500; }
+  .foot { margin-top:8px; font-size:11px; color:var(--muted); }
+  footer { padding:14px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--line); }
+  #empty { padding:30px 18px; color:var(--muted); display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FindFire: fire stations dashboard</h1>
+  <span id="sample">SAMPLE DATA, not real detections</span>
+  <span id="meta">loading...</span>
+  <button id="sound">Enable sound</button>
+</header>
+<div id="banner"></div>
+<div id="notes"></div>
+<div id="empty">No active fire zone.</div>
+<main id="cards"></main>
+<footer>
+  Water, pump and growth parameters are placeholders to be confirmed with the Protection Civile. Trucks per station
+  (3) and tank size (4000 L) are assumptions. Station positions: OpenStreetMap contributors. Estimates for comparing
+  scenarios, not an operational order.
+</footer>
+<script>
+const POLL_MS = 5000;
+let seen = null;            // zone ids already known (null until the first answer)
+let pending = [];           // new zones not acknowledged yet
+let audioCtx = null, soundOn = false;
+const byId = id => document.getElementById(id);
+
+function esc(value) {
+  return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, ch => (
+    {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
+}
+function num(x, digits) { return (x === null || x === undefined) ? "-" : Number(x).toLocaleString("en", {maximumFractionDigits: digits === undefined ? 0 : digits}); }
+function minutes(m) { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + " h " + (m % 60) + " min" : m + " min"; }
+
+function beep() {
+  if (!audioCtx) return;
+  [0, 0.35, 0.7].forEach(delay => {
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.frequency.value = 880; gain.gain.value = 0.2;
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(audioCtx.currentTime + delay); osc.stop(audioCtx.currentTime + delay + 0.2);
+  });
+}
+byId("sound").onclick = () => {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume(); soundOn = true;
+  byId("sound").textContent = "Sound on"; beep();
+};
+setInterval(() => { if (pending.length && soundOn) beep(); }, 8000);   // repeat until acknowledged
+function renderBanner(cards) {
+  const box = byId("banner");
+  if (!pending.length) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = pending.map(id => {
+    const c = cards.find(x => x.zone_id === id);
+    const text = c ? "NEW FIRE ZONE #" + esc(id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 1) + " ha | nearest station: "
+      + esc(c.nearest_station) + " (" + minutes(c.nearest_eta_min) + ")" : "NEW FIRE ZONE #" + esc(id);
+    return '<div class="row"><strong>' + text + '</strong><button data-ack="' + esc(id) + '">Acknowledge</button></div>';
+  }).join("");
+  box.querySelectorAll("button[data-ack]").forEach(b => b.onclick = () => {
+    pending = pending.filter(id => String(id) !== b.dataset.ack); renderBanner(cards);
+  });
+}
+
+function card(c) {
+  const isNew = pending.includes(c.zone_id);
+  const reinforce = c.needs_reinforcement
+    ? '<b class="warn">yes: ' + num(c.unmet_trucks) + ' trucks missing</b>' : "<b>no</b>";
+  const fc = (c.forecast || []).length
+    ? '<table><tr><th>Forecast</th><th>Area (ha)</th><th>Severity</th><th>Water (L/min)</th></tr>'
+      + c.forecast.map(s => "<tr><td>+" + esc(s.minutes) + " min</td><td>" + num(s.area_ha, 1) + '</td><td><span class="badge '
+        + esc(s.severity) + '">' + esc(s.severity) + "</span></td><td>" + num(s.flow_l_min) + "</td></tr>").join("") + "</table>"
+    : '<div class="foot">No forecast available.</div>';
+  const wind = c.wind ? " Wind " + num(c.wind.speed_ms, 1) + " m/s from " + num(c.wind.from_deg) + " deg." : "";
+  return '<div class="card' + (isNew ? " new" : "") + '">'
+    + '<div class="top"><h2>Zone #' + esc(c.zone_id) + '</h2><span class="badge ' + esc(c.severity) + '">' + esc(c.severity) + "</span></div>"
+    + '<div class="grid">'
+    + "<div><span>Area now</span><b>" + num(c.area_ha, 1) + " ha</b></div>"
+    + "<div><span>Status</span><b>" + esc(c.status) + "</b></div>"
+    + "<div><span>Water flow</span><b>" + num(c.flow_l_min) + " L/min</b></div>"
+    + "<div><span>Water, 60 min</span><b>" + num(c.volume_l) + " L</b></div>"
+    + "<div><span>Nearest station</span><b>" + esc(c.nearest_station) + "</b></div>"
+    + "<div><span>Distance / arrival</span><b>" + num(c.nearest_distance_km, 1) + " km / " + minutes(c.nearest_eta_min) + "</b></div>"
+    + "<div><span>Trucks needed at once</span><b>" + num(c.trucks_needed_now) + " (sent " + num(c.trucks_sent) + ")</b></div>"
+    + "<div><span>Last truck arrives</span><b>" + minutes(c.eta_last_truck_min) + "</b></div>"
+    + "<div><span>Tank autonomy</span><b>" + num(c.autonomy_min, 1) + " min</b></div>"
+    + "<div><span>Reinforcement</span>" + reinforce + "</div>"
+    + "</div>" + fc
+    + '<div class="foot">Terrain: ' + esc(c.terrain) + (c.terrain_assumed ? " (assumed)" : "") + ". Position "
+    + num(c.latitude, 4) + ", " + num(c.longitude, 4) + "." + wind + "</div></div>";
+}
+
+function render(data) {
+  const cards = data.cards || [];
+  const ids = cards.map(c => c.zone_id);
+  if (seen === null) { seen = new Set(ids); }                     // first answer: no alert for what already exists
+  else { ids.forEach(id => { if (!seen.has(id)) { seen.add(id); pending.push(id); if (soundOn) beep(); } }); }
+  byId("sample").style.display = data.sample ? "inline-block" : "none";
+  byId("meta").textContent = cards.length + " active zone(s), " + (data.inactive || 0) + " inactive hidden. Updated "
+    + new Date().toLocaleTimeString();
+  byId("notes").innerHTML = (data.warnings || []).concat(data.errors || []).map(w => "<div>" + esc(w) + "</div>").join("");
+  byId("empty").style.display = cards.length ? "none" : "block";
+  byId("cards").innerHTML = cards.map(card).join("");
+  renderBanner(cards);
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/cards", {cache: "no-store"});
+    render(await r.json());
+  } catch (err) {
+    byId("meta").textContent = "server not reachable: " + err;
+  }
+}
+poll(); setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
