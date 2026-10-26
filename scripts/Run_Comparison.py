@@ -1,0 +1,16 @@
+"""Run the EMSR533 validation: `python scripts/Run_Comparison.py` (or press Run in your IDE).
+
+Defaults to the August 2021 Kabylie event (the only event with EMSR533 reference maps). Extra arguments are passed
+through to scripts/validate_emsr.py, e.g.:
+
+    python scripts/Run_Comparison.py --csv data/archive/viirs_2021-08-08_2021-08-14.csv     # offline
+"""
+import runpy
+import sys
+from pathlib import Path
+
+root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root / "src"))
+if not any(a.split("=", 1)[0] in ("--csv", "--event") for a in sys.argv[1:]):
+    sys.argv += ["--event", "2021-08-08", "2021-08-16"]
+runpy.run_path(str(root / "scripts" / "validate_emsr.py"), run_name="__main__")
