@@ -131,3 +131,59 @@ def test_head_to_back_ratio_matches_finney():
     lb = r["length_breadth"]
     hb = (lb + math.sqrt(lb * lb - 1)) / (lb - math.sqrt(lb * lb - 1))
     assert r["head_m_min"] / r["back_m_min"] == pytest.approx(hb, rel=1e-9)
+
+
+# ---- follow-up: inactive zones, per-zone wind time, water hook with perimeter, wind source
+def test_inactive_zones_are_skipped_by_default():
+    zs = [dict(zone(), status="active"), dict(zone(2.0, 35.5), zone_id=8, status="inactive")]
+    out = forecast_zones(zs, lambda lat, lon: Wind(5, 90))
+    assert [f["zone_id"] for f in out] == [7]
+    assert len(forecast_zones(zs, lambda lat, lon: Wind(5, 90), skip_inactive=False)) == 2
+
+
+def test_zone_without_status_is_still_forecast():
+    assert len(forecast_zones([zone()], lambda lat, lon: Wind(5, 90))) == 1
+
+
+def test_when_is_passed_to_the_wind_function_once_or_per_zone():
+    seen = []
+    wf = lambda lat, lon, t: seen.append(t) or Wind(5, 90)
+    zs = [dict(zone(), last_detected="2021-08-10T10:00Z"), dict(zone(2.0, 35.5), zone_id=8, last_detected="2021-08-11T10:00Z")]
+    forecast_zones(zs, wf, when="2021-08-09T00:00Z")
+    forecast_zones(zs, wf, when=lambda z: z["last_detected"])
+    assert seen == ["2021-08-09T00:00Z"] * 2 + ["2021-08-10T10:00Z", "2021-08-11T10:00Z"]
+
+
+def test_wind_source_is_reported():
+    assert forecast_zone(zone(), Wind(5, 90))["wind_source"] == "open-meteo"
+    assert forecast_zone(zone(), Wind(0, 0, source="default"))["wind_source"] == "default"
+
+
+def test_steps_carry_an_ellipse_perimeter_that_matches_the_polygon():
+    f = forecast_zone(zone(), Wind(8, 270), "grass")
+    for s in f["steps"]:
+        fwd, _ = _transformers(utm_epsg(4.0, 36.0))
+        utm = shapely.transform(s["geometry"], lambda c: np.column_stack(fwd(c[:, 0], c[:, 1])))
+        assert utm.length / 1e3 == pytest.approx(s["perimeter_km"], rel=0.01)
+    assert f["steps"][0]["perimeter_km"] < f["steps"][-1]["perimeter_km"]
+
+
+def test_water_hook_receives_perimeter_and_wind_in_kmh_when_it_accepts_them():
+    got = {}
+
+    def hook(area_ha, perimeter_km, wind_kmh=0.0, terrain="forest"):
+        got.update(area=area_ha, perimeter=perimeter_km, wind=wind_kmh)
+        return dict(ok=True)
+
+    f = forecast_zone(zone(), Wind(10, 270), water_fn=hook)
+    assert got["wind"] == pytest.approx(36.0)
+    assert got["perimeter"] == pytest.approx(f["steps"][-1]["perimeter_km"])
+    assert f["steps"][0]["water"] == dict(ok=True)
+
+
+def test_the_real_water_hook_plugs_in():
+    from findfire.water.water_demand import water_for_forecast
+    f = forecast_zone(zone(), Wind(6, 270), water_fn=water_for_forecast)
+    vols = [s["water"]["volume_l"] for s in f["steps"]]
+    assert all(v > 0 for v in vols) and vols[0] <= vols[-1]
+    assert {"flow_l_min", "severity", "front_attacked_m"} <= set(f["steps"][0]["water"])
