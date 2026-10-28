@@ -15,6 +15,10 @@ import pandas as pd
 from findfire.dashboard.cards import dashboard_payload, load_state, zones_from_state
 
 PAGE = Path(__file__).with_name("index.html")
+DEFAULT_WIND = (3.0, 270.0)      # ASSUMPTION: m/s and FROM degrees, used only when no real wind is available
+
+
+_NO_WIND = {}      # replay only: (lat, lon, hour) -> reason, so a missing wind is looked up once, not per zone
 
 
 def _json_default(obj):
@@ -25,8 +29,11 @@ def _json_default(obj):
     return str(obj)
 
 
-def compute_forecast(zones, vegetation, fixed_wind=None):
-    """Growth forecast of the active zones (needs the forecast package and, unless fixed_wind, internet)."""
+def compute_forecast(zones, vegetation, fixed_wind=None, when=None, problems=None):
+    """Growth forecast of the active zones (needs the forecast package and, unless fixed_wind, internet).
+
+    `when` is the time of the state (a replayed fire has the date of the fire, not today).
+    If no wind can be found for that time and place, DEFAULT_WIND is used and the reason is added to `problems`."""
     from findfire.forecast import wind as wind_mod
     from findfire.forecast.spread import forecast_zones
     active = [z for z in zones if z.get("status") != "inactive"]
@@ -35,7 +42,21 @@ def compute_forecast(zones, vegetation, fixed_wind=None):
     if fixed_wind:
         wind_fn = lambda lat, lon: wind_mod.Wind(*fixed_wind)           # noqa: E731
     else:
-        wind_fn = getattr(wind_mod, "cached_wind_or_default", wind_mod.cached_wind)
+        def wind_fn(lat, lon):
+            key = (round(lat, 1), round(lon, 1), str(when)[:13])
+            if when is None or key not in _NO_WIND:
+                try:
+                    return wind_mod.cached_wind(lat, lon, when)
+                except Exception as err:                                # noqa: BLE001
+                    reason = (f"no wind for {when or 'now'} ({str(err)[:90]}): default wind "
+                              f"{DEFAULT_WIND[0]} m/s from {DEFAULT_WIND[1]:.0f} deg used")
+                    if when is not None:
+                        _NO_WIND[key] = reason
+            else:
+                reason = _NO_WIND[key]
+            if problems is not None:
+                problems.append(reason)
+            return wind_mod.Wind(*DEFAULT_WIND)
     return forecast_zones(active, wind_fn, vegetation)
 
 
@@ -49,7 +70,7 @@ class Dashboard:
     def payload(self) -> dict:
         with self._lock:
             if not self.state_path.exists():
-                return dict(sample=False, n_zones=0, inactive=0, cards=[], errors=[],
+                return dict(sample=False, replay=None, n_zones=0, inactive=0, cards=[], errors=[],
                             warnings=[f"state file not found: {self.state_path}. Run scripts/run_live.py first."])
             mtime = self.state_path.stat().st_mtime
             if mtime == self._mtime and self._payload is not None:
@@ -57,17 +78,23 @@ class Dashboard:
             try:
                 state = load_state(self.state_path)
             except ValueError as err:                      # file being written: keep the last good payload
-                old = self._payload or dict(sample=False, n_zones=0, inactive=0, cards=[], errors=[], warnings=[])
+                old = self._payload or dict(sample=False, replay=None, n_zones=0, inactive=0, cards=[], errors=[],
+                                            warnings=[])
                 return dict(old, warnings=old.get("warnings", []) + [f"state file unreadable for now: {err}"])
-            warnings, forecast = [], None
+            when = state.get("replay_time")
+            warnings, forecast, problems = [], None, []
             if self.forecast_on:
                 try:
-                    forecast = compute_forecast(zones_from_state(state), self.vegetation, self.fixed_wind)
+                    forecast = compute_forecast(zones_from_state(state), self.vegetation, self.fixed_wind,
+                                                when=when, problems=problems)
                 except Exception as err:                   # noqa: BLE001 - the dashboard works without a forecast
                     warnings.append(f"forecast unavailable: {err}")
-            self._payload = dashboard_payload(state, self.stations, forecast, warnings)
-            self._mtime = mtime
-            return self._payload
+                warnings.extend(dict.fromkeys(problems))   # each message once
+            payload = dashboard_payload(state, self.stations, forecast, warnings)
+            payload["replay"] = (dict(time=when, step=state.get("step"), steps=state.get("steps"),
+                                      event=state.get("event")) if state.get("replay") else None)
+            self._payload, self._mtime = payload, mtime
+            return payload
 
 
 def make_server(dashboard: Dashboard, host="127.0.0.1", port=8000) -> ThreadingHTTPServer:

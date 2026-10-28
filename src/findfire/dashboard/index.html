@@ -15,6 +15,7 @@
   button:hover { border-color:var(--accent); }
   #meta { color:var(--muted); font-size:13px; }
   #sample { display:none; background:var(--medium); color:#000; font-weight:600; padding:4px 10px; border-radius:6px; font-size:13px; }
+  #replay { display:none; background:var(--accent); color:#000; font-weight:600; padding:4px 10px; border-radius:6px; font-size:13px; }
   #banner { display:none; background:var(--critical); padding:14px 18px; font-size:16px; }
   #banner .row { display:flex; gap:12px; align-items:center; justify-content:space-between; margin:4px 0; }
   #notes { padding:0 18px; color:var(--muted); font-size:12px; }
@@ -35,6 +36,7 @@
   th:first-child, td:first-child { text-align:left; }
   th { color:var(--muted); font-weight:500; }
   .foot { margin-top:8px; font-size:11px; color:var(--muted); }
+  .more { grid-column:1 / -1; text-align:center; }
   footer { padding:14px 18px; color:var(--muted); font-size:12px; border-top:1px solid var(--line); }
   #empty { padding:30px 18px; color:var(--muted); display:none; }
 </style>
@@ -43,6 +45,7 @@
 <header>
   <h1>FindFire: fire stations dashboard</h1>
   <span id="sample">SAMPLE DATA, not real detections</span>
+  <span id="replay"></span>
   <span id="meta">loading...</span>
   <button id="sound">Enable sound</button>
 </header>
@@ -59,6 +62,9 @@
 const POLL_MS = 5000;
 let seen = null;            // zone ids already known (null until the first answer)
 let pending = [];           // new zones not acknowledged yet
+let showAll = false;        // show every zone or only the first MAX_CARDS
+const MAX_CARDS = 12;
+let lastStep = null;        // replay step of the previous answer
 let audioCtx = null, soundOn = false;
 const byId = id => document.getElementById(id);
 
@@ -86,17 +92,15 @@ byId("sound").onclick = () => {
 setInterval(() => { if (pending.length && soundOn) beep(); }, 8000);   // repeat until acknowledged
 function renderBanner(cards) {
   const box = byId("banner");
-  if (!pending.length) { box.style.display = "none"; return; }
+  const live = cards.filter(c => pending.includes(c.zone_id));      // cards come sorted: most severe first
+  if (!live.length) { box.style.display = "none"; return; }
   box.style.display = "block";
-  box.innerHTML = pending.map(id => {
-    const c = cards.find(x => x.zone_id === id);
-    const text = c ? "NEW FIRE ZONE #" + esc(id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 1) + " ha | nearest station: "
-      + esc(c.nearest_station) + " (" + minutes(c.nearest_eta_min) + ")" : "NEW FIRE ZONE #" + esc(id);
-    return '<div class="row"><strong>' + text + '</strong><button data-ack="' + esc(id) + '">Acknowledge</button></div>';
-  }).join("");
-  box.querySelectorAll("button[data-ack]").forEach(b => b.onclick = () => {
-    pending = pending.filter(id => String(id) !== b.dataset.ack); renderBanner(cards);
-  });
+  const rows = live.slice(0, 3).map(c => '<div class="row"><strong>NEW FIRE ZONE #' + esc(c.zone_id) + " | " + esc(c.severity)
+    + " | " + num(c.area_ha, 1) + " ha | nearest station: " + esc(c.nearest_station) + " (" + minutes(c.nearest_eta_min)
+    + ")</strong></div>").join("");
+  const more = live.length > 3 ? '<div class="row"><span>+ ' + (live.length - 3) + " more new zone(s)</span></div>" : "";
+  box.innerHTML = rows + more + '<div class="row"><span></span><button id="ackAll">Acknowledge all (' + live.length + ")</button></div>";
+  byId("ackAll").onclick = () => { pending = []; renderBanner(cards); };
 }
 
 function card(c) {
@@ -130,14 +134,29 @@ function card(c) {
 function render(data) {
   const cards = data.cards || [];
   const ids = cards.map(c => c.zone_id);
+  const step = data.replay ? data.replay.step : null;
+  if (step !== null && lastStep !== null && step < lastStep) { seen = new Set(); pending = []; }   // replay restarted
+  lastStep = step;
   if (seen === null) { seen = new Set(ids); }                     // first answer: no alert for what already exists
-  else { ids.forEach(id => { if (!seen.has(id)) { seen.add(id); pending.push(id); if (soundOn) beep(); } }); }
+  else {
+    let fresh = false;
+    ids.forEach(id => { if (!seen.has(id)) { seen.add(id); pending.push(id); fresh = true; } });
+    if (fresh && soundOn) beep();
+  }
+  pending = pending.filter(id => ids.includes(id));               // merged or inactive zones are no longer alerts
   byId("sample").style.display = data.sample ? "inline-block" : "none";
+  const rp = data.replay;
+  byId("replay").style.display = rp ? "inline-block" : "none";
+  if (rp) byId("replay").textContent = "REPLAY " + String(rp.time).replace("T", " ").slice(0, 16) + " UTC, step " + rp.step + "/" + rp.steps;
   byId("meta").textContent = cards.length + " active zone(s), " + (data.inactive || 0) + " inactive hidden. Updated "
     + new Date().toLocaleTimeString();
   byId("notes").innerHTML = (data.warnings || []).concat(data.errors || []).map(w => "<div>" + esc(w) + "</div>").join("");
   byId("empty").style.display = cards.length ? "none" : "block";
-  byId("cards").innerHTML = cards.map(card).join("");
+  const shown = showAll ? cards : cards.slice(0, MAX_CARDS);
+  byId("cards").innerHTML = shown.map(card).join("") + (cards.length > MAX_CARDS
+    ? '<div class="more"><button id="toggleAll">' + (showAll ? "Show only the " + MAX_CARDS + " most severe" : "Show all " + cards.length + " zones") + "</button></div>" : "");
+  const toggle = byId("toggleAll");
+  if (toggle) toggle.onclick = () => { showAll = !showAll; render(data); };
   renderBanner(cards);
 }
 
