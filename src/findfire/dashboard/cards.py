@@ -15,6 +15,7 @@ from pyproj import Geod
 from shapely.geometry import shape
 
 from findfire.response import response_for_zone
+from findfire.dashboard.dispatch import dispatch
 from findfire.water.water_demand import compute_water_demand
 
 SEVERITY_ORDER = {"critical": 0, "medium": 1, "low": 2}
@@ -72,6 +73,9 @@ def build_cards(zones: list[dict], stations: pd.DataFrame, forecast: list[dict] 
                 continue
             card = dict(plan)
             card["terrain_assumed"] = not zone.get("terrain")
+            new_hotspots = zone.get("new_hotspots")                  # replay only: observations in the last step
+            card["new_hotspots"] = None if new_hotspots is None else int(new_hotspots)
+            card["spreading"] = new_hotspots is None or int(new_hotspots) > 0
             card["forecast"] = forecast_steps(entry, card["terrain"]) if entry else []
             card["wind"] = (dict(speed_ms=entry["wind_speed_ms"], from_deg=entry["wind_from_deg"],
                                  spread_to_deg=entry["spread_to_deg"]) if entry else None)
@@ -85,5 +89,11 @@ def build_cards(zones: list[dict], stations: pd.DataFrame, forecast: list[dict] 
 def dashboard_payload(state: dict, stations: pd.DataFrame, forecast=None, warnings=None) -> dict:
     zones = zones_from_state(state)
     cards, errors, inactive = build_cards(zones, stations, forecast)
+    try:
+        plan = dispatch(cards, stations)
+    except Exception as err:          # noqa: BLE001 - the dashboard still works with the per-zone plans
+        plan = dict(summary={}, stations=[])
+        errors.append(f"dispatch: {err}")
     return dict(sample=bool(state.get("sample")), n_zones=len(zones), inactive=inactive,
-                cards=cards, errors=errors, warnings=list(warnings or []))
+                cards=cards, errors=errors, warnings=list(warnings or []),
+                dispatch=plan["summary"], stations=plan["stations"])

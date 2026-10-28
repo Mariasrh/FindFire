@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FindFire dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css">
 <style>
   :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e8eaed; --muted:#9aa0a6;
           --low:#2e7d32; --medium:#f9a825; --critical:#c62828; --accent:#4da3ff; }
@@ -13,6 +14,13 @@
   header h1 { font-size:18px; margin:0; margin-right:auto; }
   button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
   button:hover { border-color:var(--accent); }
+  select { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; max-width:360px; }
+  #mapbox { padding:14px 18px 0; }
+  #map { height:380px; border:1px solid var(--line); border-radius:10px; background:#0b0d12; }
+  .nomap { padding:20px; color:var(--muted); }
+  .leaflet-container { background:#0b0d12; }
+  .chk { font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .chg { font-size:11px; color:var(--medium); font-weight:600; margin-left:6px; }
   #meta { color:var(--muted); font-size:13px; }
   #sample { display:none; background:var(--medium); color:#000; font-weight:600; padding:4px 10px; border-radius:6px; font-size:13px; }
   #replay { display:none; background:var(--accent); color:#000; font-weight:600; padding:4px 10px; border-radius:6px; font-size:13px; }
@@ -47,21 +55,29 @@
   <span id="sample">SAMPLE DATA, not real detections</span>
   <span id="replay"></span>
   <span id="meta">loading...</span>
+  <label class="chk"><input type="checkbox" id="onlySpreading" checked> only zones still spreading</label>
+  <select id="stationSel"><option value="">All stations (command center)</option></select>
   <button id="sound">Enable sound</button>
 </header>
 <div id="banner"></div>
 <div id="notes"></div>
 <div id="empty">No active fire zone.</div>
+<div id="mapbox"><div id="map"></div></div>
 <main id="cards"></main>
 <footer>
   Water, pump and growth parameters are placeholders to be confirmed with the Protection Civile. Trucks per station
   (3) and tank size (4000 L) are assumptions. Station positions: OpenStreetMap contributors. Estimates for comparing
   scenarios, not an operational order.
 </footer>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
 <script>
 const POLL_MS = 5000;
 let seen = null;            // zone ids already known (null until the first answer)
 let pending = [];           // new zones not acknowledged yet
+let station = "";            // selected station id, "" = command center (all stations)
+let onlySpreading = true;     // hide zones with no new hotspot in the last step
+let lastOpts = null, lastData = null, stationsById = {};
+let map = null, zoneLayer = null, stationLayer = null, lineLayer = null, fitted = false;
 let showAll = false;        // show every zone or only the first MAX_CARDS
 const MAX_CARDS = 12;
 let lastStep = null;        // replay step of the previous answer
@@ -90,50 +106,131 @@ byId("sound").onclick = () => {
   byId("sound").textContent = "Sound on"; beep();
 };
 setInterval(() => { if (pending.length && soundOn) beep(); }, 8000);   // repeat until acknowledged
+function mine(cards) {
+  const byStation = station === "" ? cards : cards.filter(c => (c.involved_station_ids || []).map(String).includes(station));
+  return onlySpreading ? byStation.filter(c => c.spreading !== false) : byStation;
+}
+
+function alertLine(c) {
+  const lead = c.lead_station || {};
+  let text = "NEW FIRE ZONE #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 1) + " ha";
+  if (station === "") {
+    text += " | alert sent to " + esc(lead.name) + (lead.eta_min === undefined ? "" : " (" + minutes(lead.eta_min) + ")");
+  } else {
+    const a = (c.assignments || []).find(x => String(x.station_id) === station);
+    text += a ? " | send " + num(a.trucks) + " truck(s) as " + esc(a.role) + ", arrival " + minutes(a.eta_min)
+              : " | your station coordinates this zone, no free truck left";
+  }
+  return text;
+}
+
 function renderBanner(cards) {
   const box = byId("banner");
-  const live = cards.filter(c => pending.includes(c.zone_id));      // cards come sorted: most severe first
+  const live = mine(cards).filter(c => pending.includes(c.zone_id));      // cards come sorted: most severe first
   if (!live.length) { box.style.display = "none"; return; }
   box.style.display = "block";
-  const rows = live.slice(0, 3).map(c => '<div class="row"><strong>NEW FIRE ZONE #' + esc(c.zone_id) + " | " + esc(c.severity)
-    + " | " + num(c.area_ha, 1) + " ha | nearest station: " + esc(c.nearest_station) + " (" + minutes(c.nearest_eta_min)
-    + ")</strong></div>").join("");
+  const rows = live.slice(0, 3).map(c => '<div class="row"><strong>' + alertLine(c) + "</strong></div>").join("");
   const more = live.length > 3 ? '<div class="row"><span>+ ' + (live.length - 3) + " more new zone(s)</span></div>" : "";
   box.innerHTML = rows + more + '<div class="row"><span></span><button id="ackAll">Acknowledge all (' + live.length + ")</button></div>";
   byId("ackAll").onclick = () => { pending = []; renderBanner(cards); };
 }
 
+function showLines(c) {
+  if (!lineLayer) return;
+  lineLayer.clearLayers();
+  (c.assignments || []).forEach(a => {
+    const s = stationsById[a.station_id];
+    if (!s) return;
+    L.polyline([[s.latitude, s.longitude], [c.latitude, c.longitude]],
+      {color: a.role === "lead" ? "#4da3ff" : "#9aa0a6", weight: 2, dashArray: a.role === "lead" ? null : "4 4"}).addTo(lineLayer);
+  });
+}
+
+function drawFallback(cards) {
+  const el = byId("map");
+  if (!cards.length) { el.innerHTML = '<div class="nomap">No active zone to show on the map.</div>'; return; }
+  const lons = cards.map(c => c.longitude), lats = cards.map(c => c.latitude);
+  const x0 = Math.min(...lons) - 0.2, x1 = Math.max(...lons) + 0.2, y0 = Math.min(...lats) - 0.2, y1 = Math.max(...lats) + 0.2;
+  const W = 900, H = 340;
+  const sx = lon => 10 + (lon - x0) / (x1 - x0) * (W - 20), sy = lat => 10 + (y1 - lat) / (y1 - y0) * (H - 20);
+  const dots = cards.map(c => '<circle cx="' + sx(c.longitude).toFixed(1) + '" cy="' + sy(c.latitude).toFixed(1) + '" r="'
+    + Math.max(4, Math.min(16, 2 + 3 * Math.log10(Math.max(c.area_ha, 1)))).toFixed(1) + '" fill="#e53935" fill-opacity="0.75" stroke="#7f0000"><title>Zone #'
+    + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 0) + " ha</title></circle>").join("");
+  el.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="100%" style="background:#0b0d12">' + dots
+    + '<text x="12" y="' + (H - 10) + '" fill="#9aa0a6" font-size="12">Offline: no basemap, positions only</text></svg>';
+}
+
+function drawMap(cards, data) {
+  if (typeof L === "undefined") { drawFallback(cards); return; }
+  if (!map) {
+    map = L.map("map").setView([36.4, 4.0], 7);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"}).addTo(map);
+    zoneLayer = L.layerGroup().addTo(map); stationLayer = L.layerGroup().addTo(map); lineLayer = L.layerGroup().addTo(map);
+  }
+  zoneLayer.clearLayers(); stationLayer.clearLayers(); lineLayer.clearLayers();
+  (data.stations || []).forEach(s => {
+    if (station !== "" && String(s.id) !== station) return;
+    L.circleMarker([s.latitude, s.longitude], {radius: 4, color: "#0b3d91", weight: 1, fillColor: "#4da3ff", fillOpacity: 0.9})
+      .bindTooltip(esc(s.name) + " | " + s.zones + " zone(s), " + s.trucks + " truck(s)").addTo(stationLayer);
+  });
+  cards.forEach(c => {
+    const fresh = pending.includes(c.zone_id);
+    const radius = Math.max(5, Math.min(22, 3 + 3 * Math.log10(Math.max(c.area_ha, 1))));
+    L.circleMarker([c.latitude, c.longitude], {radius: radius, color: fresh ? "#ffffff" : "#7f0000", weight: fresh ? 3 : 1,
+      fillColor: "#e53935", fillOpacity: 0.75})
+      .bindTooltip("Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 0) + " ha | click: stations")
+      .on("click", () => showLines(c)).addTo(zoneLayer);
+  });
+  if (!fitted && cards.length) { map.fitBounds(L.latLngBounds(cards.map(c => [c.latitude, c.longitude])).pad(0.2), {maxZoom: 9}); fitted = true; }
+}
+function areaChange(c) {
+  if (c.area_change_ha === null || c.area_change_ha === undefined) return "";
+  if (c.area_change_ha === 0) return ' <small class="chg">no change</small>';
+  return ' <small class="chg">' + (c.area_change_ha > 0 ? "+" : "") + num(c.area_change_ha, 1) + " ha since last update</small>";
+}
+
 function card(c) {
   const isNew = pending.includes(c.zone_id);
+  const lead = c.lead_station || {};
   const reinforce = c.needs_reinforcement
-    ? '<b class="warn">yes: ' + num(c.unmet_trucks) + ' trucks missing</b>' : "<b>no</b>";
+    ? '<b class="warn">yes: ' + num(c.unmet_trucks) + ' trucks missing, ask mutual aid</b>' : "<b>no</b>";
+  const parts = (c.assignments || []).map(a => esc(a.station) + " x" + num(a.trucks) + " (" + minutes(a.eta_min) + ")");
+  const trucks = parts.length ? parts.slice(0, 4).join(", ") + (parts.length > 4 ? " + " + (parts.length - 4) + " more" : "") : "no free truck in range";
+  const noForecast = c.spreading === false ? "No forecast: no new hotspot in the last step, the zone is not spreading."
+                                           : "No forecast available.";
   const fc = (c.forecast || []).length
     ? '<table><tr><th>Forecast</th><th>Area (ha)</th><th>Severity</th><th>Water (L/min)</th></tr>'
       + c.forecast.map(s => "<tr><td>+" + esc(s.minutes) + " min</td><td>" + num(s.area_ha, 1) + '</td><td><span class="badge '
         + esc(s.severity) + '">' + esc(s.severity) + "</span></td><td>" + num(s.flow_l_min) + "</td></tr>").join("") + "</table>"
-    : '<div class="foot">No forecast available.</div>';
+    : '<div class="foot">' + noForecast + "</div>";
   const wind = c.wind ? " Wind " + num(c.wind.speed_ms, 1) + " m/s from " + num(c.wind.from_deg) + " deg." : "";
+  const hot = c.new_hotspots === null || c.new_hotspots === undefined ? "" : " New hotspots in the last step: " + num(c.new_hotspots) + ".";
   return '<div class="card' + (isNew ? " new" : "") + '">'
     + '<div class="top"><h2>Zone #' + esc(c.zone_id) + '</h2><span class="badge ' + esc(c.severity) + '">' + esc(c.severity) + "</span></div>"
     + '<div class="grid">'
-    + "<div><span>Area now</span><b>" + num(c.area_ha, 1) + " ha</b></div>"
+    + "<div><span>Area now</span><b>" + num(c.area_ha, 1) + " ha</b>" + areaChange(c) + "</div>"
     + "<div><span>Status</span><b>" + esc(c.status) + "</b></div>"
     + "<div><span>Water flow</span><b>" + num(c.flow_l_min) + " L/min</b></div>"
     + "<div><span>Water, 60 min</span><b>" + num(c.volume_l) + " L</b></div>"
-    + "<div><span>Nearest station</span><b>" + esc(c.nearest_station) + "</b></div>"
-    + "<div><span>Distance / arrival</span><b>" + num(c.nearest_distance_km, 1) + " km / " + minutes(c.nearest_eta_min) + "</b></div>"
+    + "<div><span>" + (c.monitoring ? "Nearest station (no alert)" : "Alert sent to (lead station)") + "</span><b>" + esc(lead.name || c.nearest_station) + "</b></div>"
+    + "<div><span>Distance / arrival</span><b>" + num(lead.distance_km === undefined ? c.nearest_distance_km : lead.distance_km, 1) + " km / "
+    + minutes(lead.eta_min === undefined ? c.nearest_eta_min : lead.eta_min) + "</b></div>"
     + "<div><span>Trucks needed at once</span><b>" + num(c.trucks_needed_now) + " (sent " + num(c.trucks_sent) + ")</b></div>"
     + "<div><span>Last truck arrives</span><b>" + minutes(c.eta_last_truck_min) + "</b></div>"
     + "<div><span>Tank autonomy</span><b>" + num(c.autonomy_min, 1) + " min</b></div>"
     + "<div><span>Reinforcement</span>" + reinforce + "</div>"
-    + "</div>" + fc
+    + "<div><span>Response</span><b>" + (c.monitoring ? "watch only: no new hotspot, no truck engaged" : c.trucks_sent > 0 ? "dispatched automatically, " + num(c.trucks_sent) + " truck(s) en route" : "no truck available in range") + "</b></div>"
+    + "<div><span>First truck arrives</span><b>" + ((c.assignments || []).length ? minutes(Math.min(...c.assignments.map(a => a.eta_min))) : "-") + "</b></div>"
+    + "</div>"
+    + '<div class="foot">Trucks from: ' + trucks + "</div>" + fc
     + '<div class="foot">Terrain: ' + esc(c.terrain) + (c.terrain_assumed ? " (assumed)" : "") + ". Position "
-    + num(c.latitude, 4) + ", " + num(c.longitude, 4) + "." + wind + "</div></div>";
+    + num(c.latitude, 4) + ", " + num(c.longitude, 4) + "." + hot + wind + "</div></div>";
 }
 
 function render(data) {
-  const cards = data.cards || [];
-  const ids = cards.map(c => c.zone_id);
+  lastData = data;
+  const all = data.cards || [];
+  const ids = all.filter(c => c.spreading !== false).map(c => c.zone_id);      // only zones still spreading raise alerts
   const step = data.replay ? data.replay.step : null;
   if (step !== null && lastStep !== null && step < lastStep) { seen = new Set(); pending = []; }   // replay restarted
   lastStep = step;
@@ -144,21 +241,37 @@ function render(data) {
     if (fresh && soundOn) beep();
   }
   pending = pending.filter(id => ids.includes(id));               // merged or inactive zones are no longer alerts
+  stationsById = {};
+  (data.stations || []).forEach(s => { stationsById[s.id] = s; });
+  const sel = byId("stationSel");
+  const opts = '<option value="">All stations (command center)</option>' + (data.stations || []).map(s =>
+    '<option value="' + esc(s.id) + '"' + (String(s.id) === station ? " selected" : "") + ">" + esc(s.name) + " (" + s.zones + " zone(s), "
+    + s.trucks + " truck(s))</option>").join("");
+  if (opts !== lastOpts) { sel.innerHTML = opts; lastOpts = opts; }
+  const cards = mine(all);
   byId("sample").style.display = data.sample ? "inline-block" : "none";
   const rp = data.replay;
   byId("replay").style.display = rp ? "inline-block" : "none";
   if (rp) byId("replay").textContent = "REPLAY " + String(rp.time).replace("T", " ").slice(0, 16) + " UTC, step " + rp.step + "/" + rp.steps;
-  byId("meta").textContent = cards.length + " active zone(s), " + (data.inactive || 0) + " inactive hidden. Updated "
-    + new Date().toLocaleTimeString();
+  const d = data.dispatch || {};
+  const notSpreading = onlySpreading ? all.filter(c => c.spreading === false).length : 0;
+  byId("meta").textContent = cards.length + " active zone(s) shown, " + (data.inactive || 0) + " inactive hidden"
+    + (notSpreading ? ", " + notSpreading + " not spreading hidden" : "")
+    + (d.trucks_total ? ". Trucks engaged " + d.trucks_engaged + "/" + d.trucks_total + ", zones not fully covered " + ((d.partly_served || 0) + (d.not_served || 0)) : "")
+    + ". Updated " + new Date().toLocaleTimeString();
   byId("notes").innerHTML = (data.warnings || []).concat(data.errors || []).map(w => "<div>" + esc(w) + "</div>").join("");
   byId("empty").style.display = cards.length ? "none" : "block";
+  try { drawMap(cards, data); } catch (err) { drawFallback(cards); }
   const shown = showAll ? cards : cards.slice(0, MAX_CARDS);
   byId("cards").innerHTML = shown.map(card).join("") + (cards.length > MAX_CARDS
     ? '<div class="more"><button id="toggleAll">' + (showAll ? "Show only the " + MAX_CARDS + " most severe" : "Show all " + cards.length + " zones") + "</button></div>" : "");
   const toggle = byId("toggleAll");
   if (toggle) toggle.onclick = () => { showAll = !showAll; render(data); };
-  renderBanner(cards);
+  renderBanner(all);
 }
+
+byId("stationSel").onchange = e => { station = e.target.value; if (lastData) render(lastData); };
+byId("onlySpreading").onchange = e => { onlySpreading = e.target.checked; if (lastData) render(lastData); };
 
 async function poll() {
   try {

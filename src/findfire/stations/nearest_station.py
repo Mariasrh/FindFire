@@ -1,6 +1,7 @@
 """Find the nearest fire stations and plan the trucks to send."""
 import math
 
+import numpy as np
 import pandas as pd
 
 EARTH_RADIUS_KM = 6371.0
@@ -21,13 +22,18 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def nearest_stations(lat: float, lon: float, stations: pd.DataFrame, n: int = 3) -> pd.DataFrame:
-    """Return the n closest stations with distance and estimated arrival time."""
-    df = stations.copy()
-    df["distance_km"] = df.apply(
-        lambda r: haversine_km(lat, lon, r["latitude"], r["longitude"]), axis=1
-    )
-    df["eta_min"] = df["distance_km"] * ROAD_FACTOR / AVG_SPEED_KMH * 60
-    return df.nsmallest(n, "distance_km").round({"distance_km": 1, "eta_min": 0})
+    """Return the n closest stations with distance and estimated arrival time (vectorised haversine)."""
+    p1 = np.radians(lat)
+    p2 = np.radians(stations["latitude"].to_numpy(dtype=float))
+    dphi = p2 - p1
+    dlmb = np.radians(stations["longitude"].to_numpy(dtype=float) - lon)
+    a = np.sin(dphi / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(dlmb / 2) ** 2
+    dist = 2 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
+    order = np.argsort(dist, kind="stable")[:n]
+    out = stations.iloc[order].copy()
+    out["distance_km"] = dist[order]
+    out["eta_min"] = out["distance_km"] * ROAD_FACTOR / AVG_SPEED_KMH * 60
+    return out.round({"distance_km": 1, "eta_min": 0})
 
 
 def plan_response(lat: float, lon: float, volume_l: float, stations: pd.DataFrame, n: int = 3) -> dict:

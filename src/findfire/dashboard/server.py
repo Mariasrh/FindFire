@@ -36,7 +36,8 @@ def compute_forecast(zones, vegetation, fixed_wind=None, when=None, problems=Non
     If no wind can be found for that time and place, DEFAULT_WIND is used and the reason is added to `problems`."""
     from findfire.forecast import wind as wind_mod
     from findfire.forecast.spread import forecast_zones
-    active = [z for z in zones if z.get("status") != "inactive"]
+    active = [z for z in zones if z.get("status") != "inactive"
+              and (z.get("new_hotspots") is None or z.get("new_hotspots") > 0)]      # still spreading
     if not active:
         return []
     if fixed_wind:
@@ -66,6 +67,7 @@ class Dashboard:
         self.fixed_wind, self.forecast_on = fixed_wind, forecast
         self.stations = pd.read_csv(stations_path)
         self._mtime, self._payload, self._lock = None, None, threading.Lock()
+        self._prev_area, self._prev_step = {}, None
 
     def payload(self) -> dict:
         with self._lock:
@@ -93,6 +95,15 @@ class Dashboard:
             payload = dashboard_payload(state, self.stations, forecast, warnings)
             payload["replay"] = (dict(time=when, step=state.get("step"), steps=state.get("steps"),
                                       event=state.get("event")) if state.get("replay") else None)
+            step = state.get("step")
+            if self._prev_step is not None and step is not None and step < self._prev_step:
+                self._prev_area = {}                               # replay restarted
+            areas = {}
+            for c in payload["cards"]:
+                areas[c["zone_id"]] = c["area_ha"]
+                before = self._prev_area.get(c["zone_id"])
+                c["area_change_ha"] = None if before is None else round(c["area_ha"] - before, 1)
+            self._prev_area, self._prev_step = areas, step
             self._payload, self._mtime = payload, mtime
             return payload
 
