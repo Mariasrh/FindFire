@@ -11,6 +11,7 @@ If the service cannot be reached, `wind_or_default` returns a calm wind marked `
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -21,6 +22,8 @@ URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 RECENT_DAYS = 60                         # older than this -> archive API
 MAX_PAST_DAYS = 92                       # Open-Meteo limit of `past_days`
+RETRIES = 3                              # tries per request (slow server, VPN hiccup, rate limit)
+TIMEOUT_S = 30
 MAX_GAP = pd.Timedelta(hours=3)          # refuse a wind value that is further than this from the asked time
 log = logging.getLogger(__name__)
 
@@ -61,7 +64,28 @@ def parse_wind(payload: dict, when) -> Wind:
 DEFAULT_WIND = Wind(0.0, 0.0, source="default")
 
 
-def _request(lat: float, lon: float, when, timeout: float = 20) -> dict:
+def _get(url: str, params: dict, timeout: float):
+    """requests.get with a few retries for timeouts, connection errors, rate limits (429) and server errors (5xx).
+    A real client error (400, 404...) is raised at once: retrying would not help."""
+    err = None
+    for attempt in range(RETRIES):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            r.raise_for_status()
+            return r
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            err = exc
+        except requests.HTTPError as exc:
+            code = getattr(exc.response, "status_code", 0) or 0
+            if code != 429 and code < 500:
+                raise
+            err = exc
+        if attempt < RETRIES - 1:
+            time.sleep(2 ** attempt)                     # 1 s, 2 s
+    raise err
+
+
+def _request(lat: float, lon: float, when, timeout: float = TIMEOUT_S) -> dict:
     """One Open-Meteo answer that contains the hour `when` (UTC)."""
     now = pd.Timestamp.now(tz="UTC")
     when = now if when is None else _utc(when)
@@ -77,12 +101,10 @@ def _request(lat: float, lon: float, when, timeout: float = 20) -> dict:
             params["past_days"] = min(MAX_PAST_DAYS, (now.floor("D") - when.floor("D")).days)   # calendar days back
             if params["past_days"] == 0:
                 del params["past_days"]
-    r = requests.get(url, params=params, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
+    return _get(url, params, timeout).json()
 
 
-def fetch_wind(lat: float, lon: float, when=None, timeout: float = 20) -> Wind:
+def fetch_wind(lat: float, lon: float, when=None, timeout: float = TIMEOUT_S) -> Wind:
     """Wind at (lat, lon) for the hour closest to `when` (default: now, UTC). Needs internet, no key."""
     return parse_wind(_request(lat, lon, when, timeout), pd.Timestamp.now(tz="UTC") if when is None else when)
 

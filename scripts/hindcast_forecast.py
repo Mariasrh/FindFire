@@ -27,6 +27,8 @@ ap.add_argument("--wind", nargs=2, type=float, metavar=("SPEED_MS", "FROM_DEG"))
 ap.add_argument("--archive-wind", action="store_true", help="Open-Meteo wind at the time of each step; old events use the archive (needs internet)")
 ap.add_argument("--vegetation", default="shrub", choices=sorted(BASE_ROS_M_MIN))
 ap.add_argument("--step-hours", type=float, default=12)
+ap.add_argument("--rate-scale", nargs="+", type=float, metavar="F",
+                help="also try these factors on the base spread rate (e.g. 1 0.5 0.2 0.1) and show where the growth ratio crosses 1")
 a = ap.parse_args()
 if not (a.wind or a.archive_wind):
     raise SystemExit("give --wind SPEED FROM_DEG or --archive-wind")
@@ -38,22 +40,37 @@ else:
     v = firms.fetch_range(FIRMS_SP_SOURCES, s, e)
 w, s_, e_, n = STUDY_BBOX
 v = v[v.latitude.between(s_, n) & v.longitude.between(w, e_)]
+print(f"FIRMS data ready: {len(v)} hotspots. Tracking...", flush=True)
 res = run_tracking(v, None, load_exclusions(), step=pd.Timedelta(hours=a.step_hours))
 
 
 def wind_for(c, t):
     """Fixed wind, or the real wind of that moment (archive for old events). Raises if Open-Meteo cannot answer."""
-    return Wind(*a.wind) if a.wind else cached_wind(c.y, c.x, t)
+    if a.wind:
+        return Wind(*a.wind)
+    # 0.5 degree grid: reanalysis wind is smooth over tens of km, and fewer cells means far fewer slow requests
+    return cached_wind(round(c.y * 2) / 2, round(c.x * 2) / 2, t)
 
 
-rows = []
+print(f"Tracking done: {len(res['snaps'])} steps. Fetching wind (one request per 0.5 degree cell per day)...", flush=True)
+rows, skipped, ctx = [], [], []
 for s0, s1 in zip(res["snaps"][:-1], res["snaps"][1:]):
     later = {z["zone_id"]: z for z in s1["zones"]}
     for z in s0["zones"]:
         if z["status"] == "inactive" or z["zone_id"] not in later:
             continue
-        pred = grow(z["area_ha"], wind_for(z["geometry"].centroid, s0["time"]), a.vegetation, a.step_hours * 60)["area_ha"]
+        try:
+            wind = wind_for(z["geometry"].centroid, s0["time"])
+        except Exception as exc:                      # no wind for this zone-step: leave it out, do not guess a wind
+            skipped.append(f"zone {z['zone_id']} {s0['time']:%Y-%m-%d %H:%M}: {type(exc).__name__}")
+            continue
+        if len(rows) % 10 == 0:
+            print(f"  ...{len(rows)} zone-steps done", flush=True)
+        pred = grow(z["area_ha"], wind, a.vegetation, a.step_hours * 60)["area_ha"]
+        ctx.append((z["area_ha"], wind, later[z["zone_id"]]["area_ha"]))
         rows.append(dict(zone=z["zone_id"], t=s0["time"], now=z["area_ha"], predicted=pred, observed=later[z["zone_id"]]["area_ha"]))
+if skipped:
+    print(f"WARNING: {len(skipped)} zone-step(s) left out, no wind data (first: {skipped[0]}). Rerun to retry them.")
 d = pd.DataFrame(rows)
 if d.empty:
     raise SystemExit("no zone is tracked across two steps: use a longer period")
@@ -72,6 +89,33 @@ if len(grew):
           f"{(grew.pred_growth / grew.obs_growth).median():.1f}x")
 else:
     print("no zone grew in the observed data: calibration is not possible on this period")
+# by zone size: the model adds a minimum amount of area per step, so small zones overshoot most
+d["size"] = pd.cut(d.now, [0, 100, 1000, np.inf], labels=["< 100 ha", "100-1000 ha", "> 1000 ha"])
+print("\nBy zone size at the start of the step (predicted/observed area, 1.00 = perfect):")
+for name, g in d.groupby("size", observed=True):
+    gg = g[g.obs_growth > 0.5]
+    gr = f"{(gg.pred_growth / gg.obs_growth).median():.1f}x" if len(gg) else "n/a"
+    print(f"  {name:>12}: {len(g):4d} zone-steps | median ratio {g.ratio.median():5.2f} | "
+          f"growing zones: {len(gg):3d}, predicted/observed growth {gr}")
 print("Reading it: ratio > 1 = model grows fires too fast (lower BASE_ROS_M_MIN); < 1 = too slow.")
 print("Most zones in a quiet period stop growing, so judge the model on the growing zones and on a real wildfire event.")
 print("Observed area is a cumulative hotspot footprint, not a burned-area map: treat it as a rough reference.")
+
+if a.rate_scale:
+    # the winds are already fetched, so trying other factors costs no requests
+    print("\nSCAN of the base spread rate (growing zones only; 1.0x = prediction matches observed growth):")
+    original = dict(BASE_ROS_M_MIN)
+    try:
+        for f in a.rate_scale:
+            for k in original:
+                BASE_ROS_M_MIN[k] = original[k] * f
+            pg = np.array([grow(area, wd, a.vegetation, a.step_hours * 60)["area_ha"] - area for area, wd, _ in ctx])
+            og = np.array([obs - area for area, _, obs in ctx])
+            m = og > 0.5
+            r = np.median(pg[m] / og[m]) if m.any() else float("nan")
+            big = m & (d["now"].to_numpy() > 1000)
+            rb = np.median(pg[big] / og[big]) if big.any() else float("nan")
+            print(f"  rate x{f:<5g}: all growing zones {r:6.1f}x | zones > 1000 ha {rb:6.1f}x")
+    finally:
+        BASE_ROS_M_MIN.update(original)
+    print("Remember: the hotspot footprint undercounts real growth, so do not tune to exactly 1.0x. Check against CEMS.")
