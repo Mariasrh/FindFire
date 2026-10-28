@@ -27,6 +27,7 @@ ap.add_argument("--wind", nargs=2, type=float, metavar=("SPEED_MS", "FROM_DEG"))
 ap.add_argument("--archive-wind", action="store_true", help="Open-Meteo wind at the time of each step; old events use the archive (needs internet)")
 ap.add_argument("--vegetation", default="shrub", choices=sorted(BASE_ROS_M_MIN))
 ap.add_argument("--step-hours", type=float, default=12)
+ap.add_argument("--fuel", action="store_true", help="scale the spread rate by fuel dryness (Canadian FFMC from Open-Meteo weather, needs internet)")
 ap.add_argument("--rate-scale", nargs="+", type=float, metavar="F",
                 help="also try these factors on the base spread rate (e.g. 1 0.5 0.2 0.1) and show where the growth ratio crosses 1")
 a = ap.parse_args()
@@ -42,6 +43,14 @@ w, s_, e_, n = STUDY_BBOX
 v = v[v.latitude.between(s_, n) & v.longitude.between(w, e_)]
 print(f"FIRMS data ready: {len(v)} hotspots. Tracking...", flush=True)
 res = run_tracking(v, None, load_exclusions(), step=pd.Timedelta(hours=a.step_hours))
+
+
+from findfire.forecast.fuel import cached_fuel
+
+
+def fuel_factor_for(c, t):
+    """1.0 without --fuel, else the dryness factor of that place and day (same 0.5 degree grid as the wind)."""
+    return cached_fuel(round(c.y * 2) / 2, round(c.x * 2) / 2, t).factor if a.fuel else 1.0
 
 
 def wind_for(c, t):
@@ -61,16 +70,17 @@ for s0, s1 in zip(res["snaps"][:-1], res["snaps"][1:]):
             continue
         try:
             wind = wind_for(z["geometry"].centroid, s0["time"])
-        except Exception as exc:                      # no wind for this zone-step: leave it out, do not guess a wind
+            ff = fuel_factor_for(z["geometry"].centroid, s0["time"])
+        except Exception as exc:                      # no wind (or fuel weather) for this zone-step: leave it out, do not guess
             skipped.append(f"zone {z['zone_id']} {s0['time']:%Y-%m-%d %H:%M}: {type(exc).__name__}")
             continue
         if len(rows) % 10 == 0:
             print(f"  ...{len(rows)} zone-steps done", flush=True)
-        pred = grow(z["area_ha"], wind, a.vegetation, a.step_hours * 60)["area_ha"]
-        ctx.append((z["area_ha"], wind, later[z["zone_id"]]["area_ha"]))
+        pred = grow(z["area_ha"], wind, a.vegetation, a.step_hours * 60, ff)["area_ha"]
+        ctx.append((z["area_ha"], wind, later[z["zone_id"]]["area_ha"], ff))
         rows.append(dict(zone=z["zone_id"], t=s0["time"], now=z["area_ha"], predicted=pred, observed=later[z["zone_id"]]["area_ha"]))
 if skipped:
-    print(f"WARNING: {len(skipped)} zone-step(s) left out, no wind data (first: {skipped[0]}). Rerun to retry them.")
+    print(f"WARNING: {len(skipped)} zone-step(s) left out, no wind/weather data (first: {skipped[0]}). Rerun to retry them.")
 d = pd.DataFrame(rows)
 if d.empty:
     raise SystemExit("no zone is tracked across two steps: use a longer period")
@@ -109,8 +119,8 @@ if a.rate_scale:
         for f in a.rate_scale:
             for k in original:
                 BASE_ROS_M_MIN[k] = original[k] * f
-            pg = np.array([grow(area, wd, a.vegetation, a.step_hours * 60)["area_ha"] - area for area, wd, _ in ctx])
-            og = np.array([obs - area for area, _, obs in ctx])
+            pg = np.array([grow(area, wd, a.vegetation, a.step_hours * 60, ff)["area_ha"] - area for area, wd, _, ff in ctx])
+            og = np.array([obs - area for area, _, obs, _ in ctx])
             m = og > 0.5
             r = np.median(pg[m] / og[m]) if m.any() else float("nan")
             big = m & (d["now"].to_numpy() > 1000)

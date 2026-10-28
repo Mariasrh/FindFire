@@ -7,8 +7,9 @@ What it does, in plain words
   4. LB gives the back rate Rb = R (1 - e) / (1 + e), with e = sqrt(LB^2 - 1) / LB.
   5. After t minutes the fire reaches r0 + R t downwind and r0 + Rb t upwind. The sideways reach follows from LB.
 
-LIMITS
-  * Not a physical model: no slope, no fuel moisture, no spotting, no firefighting, no change of wind in time.
+LIMITS (say them in the report)
+  * Not a physical model: no slope, no spotting, no firefighting, no change of wind in time.
+  * Fuel dryness is optional (forecast.fuel, Canadian FFMC): without it every zone has the reference dryness.
   * The zone is a circle at the start, so its real shape is ignored.
   * Rates marked ASSUMPTION below are placeholders. Replace them with sourced values (docs/references.md).
   * Wind comes from a weather model at 10 m height, not measured at the fire.
@@ -24,6 +25,7 @@ import shapely
 from shapely import affinity
 from shapely.geometry import Point, shape
 
+from findfire.forecast.fuel import Fuel
 from findfire.forecast.wind import Wind
 from findfire.zones.geometry import _transformers, utm_epsg
 
@@ -47,21 +49,22 @@ def length_breadth(midflame_ms: float) -> float:
     return min(LB_MAX, max(1.0, 0.936 * math.exp(0.2566 * u) + 0.461 * math.exp(-0.1548 * u) - 0.397))
 
 
-def rates(wind: Wind, vegetation: str = "shrub") -> dict:
-    """Head and back rate of spread (m/min) and the length-to-breadth ratio."""
+def rates(wind: Wind, vegetation: str = "shrub", fuel_factor: float = 1.0) -> dict:
+    """Head and back rate of spread (m/min) and the length-to-breadth ratio.
+    `fuel_factor` scales the rate for fuel dryness (forecast.fuel.Fuel.factor, 1.0 = reference dryness)."""
     if vegetation not in BASE_ROS_M_MIN:
         raise ValueError(f"vegetation must be one of {sorted(BASE_ROS_M_MIN)}")
     u = wind.speed_ms * WIND_ADJUSTMENT
     lb = length_breadth(u)
-    head = BASE_ROS_M_MIN[vegetation] * (1.0 + WIND_GAIN * u)
+    head = BASE_ROS_M_MIN[vegetation] * fuel_factor * (1.0 + WIND_GAIN * u)
     ecc = math.sqrt(lb * lb - 1.0) / lb
     back = head * (1.0 - ecc) / (1.0 + ecc)
     return dict(head_m_min=head, back_m_min=back, length_breadth=lb)
 
 
-def grow(area_ha: float, wind: Wind, vegetation: str, minutes: float) -> dict:
+def grow(area_ha: float, wind: Wind, vegetation: str, minutes: float, fuel_factor: float = 1.0) -> dict:
     """Ellipse after `minutes`: semi-axes a (along the wind) and b (across), centre shift (m), area (ha)."""
-    r = rates(wind, vegetation)
+    r = rates(wind, vegetation, fuel_factor)
     r0 = math.sqrt(max(area_ha, 0.0) * 1e4 / math.pi)
     total = (r["head_m_min"] + r["back_m_min"]) * minutes / 2.0       # growth of the long semi-axis
     a = r0 + total
@@ -105,38 +108,45 @@ def _call_water(water_fn: Callable, area_ha: float, perimeter_km: float, wind_ms
 
 
 def forecast_zone(zone: dict, wind: Wind, vegetation: str = "shrub", horizons=HORIZONS_MIN,
-                  water_fn: Callable[..., dict] | None = None) -> dict:
+                  water_fn: Callable[..., dict] | None = None, fuel: Fuel | None = None) -> dict:
     """Forecast one zone. `zone` needs `area_ha` and `geometry` (shapely or GeoJSON); `zone_id` is kept if present.
 
     `water_fn` is optional. It is called with the forecast area, and also with `perimeter_km` and `wind_kmh` if it
-    accepts them (see findfire.water.water_demand.water_for_forecast). Every step then gets a `water` entry."""
+    accepts them (see findfire.water.water_demand.water_for_forecast). Every step then gets a `water` entry.
+    `fuel` is optional (forecast.fuel.Fuel): its factor scales the spread rate. None = reference dryness (factor 1)."""
+    factor = 1.0 if fuel is None else fuel.factor
     geom = zone["geometry"]
     geom = geom if hasattr(geom, "centroid") else shape(geom)
     c = geom.centroid
     steps = []
     for t in horizons:
-        g = grow(zone["area_ha"], wind, vegetation, t)
+        g = grow(zone["area_ha"], wind, vegetation, t, factor)
         step = dict(minutes=t, area_ha=g["area_ha"], growth_ha=g["area_ha"] - zone["area_ha"],
                     perimeter_km=g["perimeter_km"],
                     geometry=ellipse_polygon(c.x, c.y, g["a_m"], g["b_m"], g["shift_m"], wind.to_deg))
         if water_fn is not None:
             step["water"] = _call_water(water_fn, g["area_ha"], g["perimeter_km"], wind.speed_ms)
         steps.append(step)
-    r = rates(wind, vegetation)
+    r = rates(wind, vegetation, factor)
     return dict(zone_id=zone.get("zone_id"), area_now_ha=zone["area_ha"], vegetation=vegetation,
                 wind_speed_ms=wind.speed_ms, wind_from_deg=wind.from_deg, spread_to_deg=wind.to_deg,
-                wind_source=wind.source, length_breadth=r["length_breadth"], head_ros_m_min=r["head_m_min"], steps=steps)
+                wind_source=wind.source, length_breadth=r["length_breadth"], head_ros_m_min=r["head_m_min"],
+                fuel_factor=factor, ffmc=None if fuel is None else fuel.ffmc, fuel_source=None if fuel is None else fuel.source,
+                steps=steps)
 
 
 def forecast_zones(zones: list[dict], wind_fn: Callable[..., Wind], vegetation: str = "shrub",
-                   horizons=HORIZONS_MIN, water_fn=None, when=None, skip_inactive: bool = True) -> list[dict]:
+                   horizons=HORIZONS_MIN, water_fn=None, when=None, skip_inactive: bool = True,
+                   fuel_fn: Callable[..., Fuel] | None = None) -> list[dict]:
     """Forecast every zone.
 
     `wind_fn(lat, lon) -> Wind`, or `wind_fn(lat, lon, when) -> Wind` when `when` is given
     (e.g. forecast.wind.wind_or_default, or a fixed wind for tests).
     `when`: the moment the wind is taken at. None = the wind function's own default (now). A timestamp = one moment for
     every zone (a replay step). A function `zone -> timestamp` = per zone, e.g. `lambda z: z["last_detected"]`.
-    `skip_inactive`: zones with status "inactive" (no detection for days, an old burn) get no forecast."""
+    `skip_inactive`: zones with status "inactive" (no detection for days, an old burn) get no forecast.
+    `fuel_fn`: optional, called like `wind_fn` (lat, lon) or (lat, lon, when) and returns a Fuel
+    (e.g. forecast.fuel.fuel_or_default). None = no fuel dryness, factor 1."""
     out = []
     for z in zones:
         if skip_inactive and z.get("status") == "inactive":
@@ -147,5 +157,8 @@ def forecast_zones(zones: list[dict], wind_fn: Callable[..., Wind], vegetation: 
             wind = wind_fn(c.y, c.x)
         else:
             wind = wind_fn(c.y, c.x, when(z) if callable(when) else when)
-        out.append(forecast_zone(z, wind, vegetation, horizons, water_fn))
+        fuel = None
+        if fuel_fn is not None:
+            fuel = fuel_fn(c.y, c.x) if when is None else fuel_fn(c.y, c.x, when(z) if callable(when) else when)
+        out.append(forecast_zone(z, wind, vegetation, horizons, water_fn, fuel))
     return out
