@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,11 +30,45 @@ def _json_default(obj):
     return str(obj)
 
 
+WIND_GRID_DEG = 0.5      # winds are looked up on a 0.5 degree grid (about 55 km): far fewer requests
+WIND_WORKERS = 8         # and the requests of one step run in parallel
+WIND_CACHE_PATH = None   # set by scripts/serve_dashboard.py: winds of past dates are kept there, so a replay works offline
+_cache_lock = threading.Lock()
+
+
+def _snap(value):
+    return round(value / WIND_GRID_DEG) * WIND_GRID_DEG
+
+
+def _cache_key(lat, lon, when):
+    return f"{lat:.2f},{lon:.2f},{str(when)[:13]}"
+
+
+def _read_cache():
+    try:
+        return json.loads(Path(WIND_CACHE_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _write_cache(cache):
+    try:
+        path = Path(WIND_CACHE_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass                                              # the cache is a convenience, never a reason to fail
+
+
 def compute_forecast(zones, vegetation, fixed_wind=None, when=None, problems=None):
     """Growth forecast of the active zones (needs the forecast package and, unless fixed_wind, internet).
 
     `when` is the time of the state (a replayed fire has the date of the fire, not today).
     If no wind can be found for that time and place, DEFAULT_WIND is used and the reason is added to `problems`."""
+    from shapely.geometry import shape
+
     from findfire.forecast import wind as wind_mod
     from findfire.forecast.spread import forecast_zones
     active = [z for z in zones if z.get("status") != "inactive"
@@ -43,20 +78,51 @@ def compute_forecast(zones, vegetation, fixed_wind=None, when=None, problems=Non
     if fixed_wind:
         wind_fn = lambda lat, lon: wind_mod.Wind(*fixed_wind)           # noqa: E731
     else:
-        def wind_fn(lat, lon):
-            key = (round(lat, 1), round(lon, 1), str(when)[:13])
-            if when is None or key not in _NO_WIND:
-                try:
-                    return wind_mod.cached_wind(lat, lon, when)
-                except Exception as err:                                # noqa: BLE001
-                    reason = (f"no wind for {when or 'now'} ({str(err)[:90]}): default wind "
-                              f"{DEFAULT_WIND[0]} m/s from {DEFAULT_WIND[1]:.0f} deg used")
-                    if when is not None:
-                        _NO_WIND[key] = reason
+        history = when is not None
+        use_disk = history and WIND_CACHE_PATH is not None
+        disk = _read_cache() if use_disk else {}
+        found, failed, new_winds = {}, {}, {}                           # per forecast: cell -> Wind / reason
+
+        def lookup(cell):
+            if cell in found or cell in failed:
+                return
+            lat, lon = cell
+            key = _cache_key(lat, lon, when)
+            if use_disk and key in disk:
+                found[cell] = wind_mod.Wind(disk[key]["speed_ms"], disk[key]["from_deg"])
+            elif history and key in _NO_WIND:
+                failed[cell] = _NO_WIND[key]
             else:
-                reason = _NO_WIND[key]
+                try:
+                    wind = wind_mod.cached_wind(lat, lon, when)
+                except Exception as err:                                # noqa: BLE001
+                    failed[cell] = (f"no wind for {when or 'now'} ({str(err)[:90]}): default wind "
+                                    f"{DEFAULT_WIND[0]} m/s from {DEFAULT_WIND[1]:.0f} deg used")
+                    if history:
+                        _NO_WIND[key] = failed[cell]
+                else:
+                    found[cell] = wind
+                    if use_disk:
+                        new_winds[key] = dict(speed_ms=float(wind.speed_ms), from_deg=float(wind.from_deg))
+
+        cells = set()
+        for z in active:
+            geom = z["geometry"] if hasattr(z["geometry"], "centroid") else shape(z["geometry"])
+            cells.add((_snap(geom.centroid.y), _snap(geom.centroid.x)))
+        with ThreadPoolExecutor(max_workers=WIND_WORKERS) as pool:
+            list(pool.map(lookup, sorted(cells)))
+        if new_winds:
+            with _cache_lock:
+                disk.update(new_winds)
+                _write_cache(disk)
+
+        def wind_fn(lat, lon):
+            cell = (_snap(lat), _snap(lon))
+            lookup(cell)                                                # normally already done above
+            if cell in found:
+                return found[cell]
             if problems is not None:
-                problems.append(reason)
+                problems.append(failed[cell])
             return wind_mod.Wind(*DEFAULT_WIND)
     return forecast_zones(active, wind_fn, vegetation)
 

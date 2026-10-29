@@ -133,7 +133,7 @@ def test_a_missing_wind_is_looked_up_once_per_cell_not_once_per_zone(monkeypatch
     assert len(result) == 5 and len(calls) == 1 and len(problems) == 5
 
 
-def test_live_mode_keeps_asking_for_the_wind(monkeypatch):
+def test_live_mode_asks_again_on_the_next_forecast(monkeypatch):
     calls = []
 
     def no_wind(lat, lon, when=None):
@@ -143,4 +143,5 @@ def test_live_mode_keeps_asking_for_the_wind(monkeypatch):
     monkeypatch.setattr("findfire.forecast.wind.cached_wind", no_wind)
     zones = [dict(zone(i, "active", 30), geometry=box(4.0, 36.7, 4.004, 36.704)) for i in range(1, 4)]
     compute_forecast(zones, "shrub", problems=[])
-    assert len(calls) == 3
+    compute_forecast(zones, "shrub", problems=[])
+    assert len(calls) == 2                      # once per forecast for the cell, not remembered between forecasts
