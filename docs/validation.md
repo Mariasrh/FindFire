@@ -16,8 +16,8 @@ Under FindFire's state machine (`INACTIVE = pd.Timedelta(days=3)` in `src/findfi
 ### One Unified Story: Replay & Validation Alignment
 Because an operational demonstration cannot rely on a live wildfire occurring on demo day, the system architecture feeds real archived satellite detections through the exact same production pipeline:
 
-1. **Demonstration Replay**: Replays real, archived detections from the **Kabylie wildfire complex of August 8–14, 2021** step by step through the pipeline. The dashboard behaves dynamically as if the event were occurring live: early MTG warnings trigger alerts, VIIRS passes cluster into expanding fire zones, the F6 elliptical spread model projects growth, and nearest fire stations calculate water and truck requirements.
-2. **Quantitative Validation**: The performance metrics table (precision, recall, alert lead time, latency, and false-alarm suppression) is evaluated on this exact same August 2021 Kabylie event against independent ground-truth mapping from the Copernicus Emergency Management Service (**EMSR533**).
+1. **Demonstration Replay**: Replays real, archived detections from the **Kabylie wildfire complex of August 8–14, 2021** step by step through the pipeline. The dashboard behaves dynamically as if the event were occurring live: VIIRS passes cluster into expanding fire zones, the F6 elliptical spread model projects growth, and nearest fire stations calculate water and truck requirements.
+2. **Quantitative Validation**: The performance metrics table (precision, recall, IoU and false-alarm suppression) is evaluated on this exact same August 2021 Kabylie event against independent ground-truth mapping from the Copernicus Emergency Management Service (**EMSR533**).
 
 By using the August 2021 Kabylie event for both the interactive demonstration and the empirical validation, the demo and the reported numbers tell **one coherent, rigorous, and verifiable story**.
 
@@ -58,7 +58,7 @@ Copernicus mapped the burned scar using optical satellite imagery (Sentinel-2B, 
 
 ### Performance Insights
 1. **Recall Stability (~66%)**: Using 375 m thermal anomalies alone, the tracking pipeline detects about two-thirds of the total ground scar mapped by sub-10 m optical sensors.
-2. **Precision Improvement (63% \(\to\) 70%)**: As the fire reaches its containment boundary and interior unburned pockets fill in over successive overpasses, geometric agreement between our alpha-shape cumulative footprints and optical scars steadily increases.
+2. **Precision Improvement**: Precision rises from 0.63 to 0.69 between 12 and 14 Aug as our zones and the mapped scar converge. Our data stops on 14 Aug, so Monit03 and Monit04 compare our final zones (53,155 ha) with a reference that is still growing.
 3. **Burned Extent Comparison**: At final observation (Monit04), total areas are close (53,155 vs 56,158 ha) but about two thirds overlap (recall 0.66).
 
 ---
