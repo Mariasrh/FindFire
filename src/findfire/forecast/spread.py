@@ -7,7 +7,7 @@ What it does, in plain words
   4. LB gives the back rate Rb = R (1 - e) / (1 + e), with e = sqrt(LB^2 - 1) / LB.
   5. After t minutes the fire reaches r0 + R t downwind and r0 + Rb t upwind. The sideways reach follows from LB.
 
-LIMITS (say them in the report)
+LIMITS
   * Not a physical model: no slope, no fuel moisture, no spotting, no firefighting, no change of wind in time.
   * The zone is a circle at the start, so its real shape is ignored.
   * Rates marked ASSUMPTION below are placeholders. Replace them with sourced values (docs/references.md).
@@ -15,6 +15,7 @@ LIMITS (say them in the report)
 """
 from __future__ import annotations
 
+import inspect
 import math
 from typing import Callable
 
@@ -66,7 +67,12 @@ def grow(area_ha: float, wind: Wind, vegetation: str, minutes: float) -> dict:
     a = r0 + total
     b = r0 + total / r["length_breadth"]
     shift = (r["head_m_min"] - r["back_m_min"]) * minutes / 2.0       # centre moves downwind
-    return dict(a_m=a, b_m=b, shift_m=shift, area_ha=math.pi * a * b / 1e4, **r)
+    return dict(a_m=a, b_m=b, shift_m=shift, area_ha=math.pi * a * b / 1e4, perimeter_km=_ellipse_perimeter_m(a, b) / 1e3, **r)
+
+
+def _ellipse_perimeter_m(a: float, b: float) -> float:
+    """Ramanujan's approximation, accurate to a few parts per million for fire-like ellipses."""
+    return math.pi * (3 * (a + b) - math.sqrt((3 * a + b) * (a + 3 * b)))
 
 
 def ellipse_polygon(lon: float, lat: float, a_m: float, b_m: float, shift_m: float, to_deg: float):
@@ -82,11 +88,28 @@ def ellipse_polygon(lon: float, lat: float, a_m: float, b_m: float, shift_m: flo
     return shapely.transform(e, lambda c: np.column_stack(inv(c[:, 0], c[:, 1])))
 
 
+def _call_water(water_fn: Callable, area_ha: float, perimeter_km: float, wind_ms: float) -> dict:
+    """Call the water function with as much as it accepts: (area), or (area, perimeter_km, wind_kmh).
+    findfire.water.water_demand.water_for_forecast takes the full set; a plain `lambda ha: ...` still works."""
+    try:
+        params = inspect.signature(water_fn).parameters
+    except (TypeError, ValueError):
+        return water_fn(area_ha)
+    var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    kw = {}
+    if "perimeter_km" in params or var_kw:
+        kw["perimeter_km"] = perimeter_km
+    if "wind_kmh" in params or var_kw:
+        kw["wind_kmh"] = wind_ms * 3.6
+    return water_fn(area_ha, **kw)
+
+
 def forecast_zone(zone: dict, wind: Wind, vegetation: str = "shrub", horizons=HORIZONS_MIN,
-                  water_fn: Callable[[float], dict] | None = None) -> dict:
+                  water_fn: Callable[..., dict] | None = None) -> dict:
     """Forecast one zone. `zone` needs `area_ha` and `geometry` (shapely or GeoJSON); `zone_id` is kept if present.
 
-    `water_fn(area_ha) -> dict` is optional: plug in the water-demand function (F5) and every step gets a `water` entry."""
+    `water_fn` is optional. It is called with the forecast area, and also with `perimeter_km` and `wind_kmh` if it
+    accepts them (see findfire.water.water_demand.water_for_forecast). Every step then gets a `water` entry."""
     geom = zone["geometry"]
     geom = geom if hasattr(geom, "centroid") else shape(geom)
     c = geom.centroid
@@ -94,22 +117,35 @@ def forecast_zone(zone: dict, wind: Wind, vegetation: str = "shrub", horizons=HO
     for t in horizons:
         g = grow(zone["area_ha"], wind, vegetation, t)
         step = dict(minutes=t, area_ha=g["area_ha"], growth_ha=g["area_ha"] - zone["area_ha"],
+                    perimeter_km=g["perimeter_km"],
                     geometry=ellipse_polygon(c.x, c.y, g["a_m"], g["b_m"], g["shift_m"], wind.to_deg))
         if water_fn is not None:
-            step["water"] = water_fn(g["area_ha"])
+            step["water"] = _call_water(water_fn, g["area_ha"], g["perimeter_km"], wind.speed_ms)
         steps.append(step)
     r = rates(wind, vegetation)
     return dict(zone_id=zone.get("zone_id"), area_now_ha=zone["area_ha"], vegetation=vegetation,
                 wind_speed_ms=wind.speed_ms, wind_from_deg=wind.from_deg, spread_to_deg=wind.to_deg,
-                length_breadth=r["length_breadth"], head_ros_m_min=r["head_m_min"], steps=steps)
+                wind_source=wind.source, length_breadth=r["length_breadth"], head_ros_m_min=r["head_m_min"], steps=steps)
 
 
-def forecast_zones(zones: list[dict], wind_fn: Callable[[float, float], Wind], vegetation: str = "shrub",
-                   horizons=HORIZONS_MIN, water_fn=None) -> list[dict]:
-    """Forecast every zone. `wind_fn(lat, lon) -> Wind` (e.g. forecast.wind.cached_wind, or a fixed wind for tests)."""
+def forecast_zones(zones: list[dict], wind_fn: Callable[..., Wind], vegetation: str = "shrub",
+                   horizons=HORIZONS_MIN, water_fn=None, when=None, skip_inactive: bool = True) -> list[dict]:
+    """Forecast every zone.
+
+    `wind_fn(lat, lon) -> Wind`, or `wind_fn(lat, lon, when) -> Wind` when `when` is given
+    (e.g. forecast.wind.wind_or_default, or a fixed wind for tests).
+    `when`: the moment the wind is taken at. None = the wind function's own default (now). A timestamp = one moment for
+    every zone (a replay step). A function `zone -> timestamp` = per zone, e.g. `lambda z: z["last_detected"]`.
+    `skip_inactive`: zones with status "inactive" (no detection for days, an old burn) get no forecast."""
     out = []
     for z in zones:
+        if skip_inactive and z.get("status") == "inactive":
+            continue
         geom = z["geometry"] if hasattr(z["geometry"], "centroid") else shape(z["geometry"])
         c = geom.centroid
-        out.append(forecast_zone(z, wind_fn(c.y, c.x), vegetation, horizons, water_fn))
+        if when is None:
+            wind = wind_fn(c.y, c.x)
+        else:
+            wind = wind_fn(c.y, c.x, when(z) if callable(when) else when)
+        out.append(forecast_zone(z, wind, vegetation, horizons, water_fn))
     return out
