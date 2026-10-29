@@ -46,6 +46,18 @@ Measured on one event only: Kabylie, 8 to 14 August 2021, real wind of those day
 - The model grows the **whole edge** of a zone. For a zone of about 26,000 ha, a circle of that area has a perimeter of about 57 km; probably only a few km of it are really burning at a given time. So large zones are overestimated more than small ones.
 - The placeholder head rates are not absurd as head-fire speeds (observed rates in Mediterranean shrub and pine experiments reach about 14 to 20 m/min); the gap comes from holding that speed for 12 hours.
 
+## Fuel dryness: tried, not used
+Humidity and temperature were tried in the spread rate, on branch `feat/forecast-fuel-moisture` (`forecast/fuel.py`, option `--fuel`, off by default). Fuel moisture comes from the Canadian Fine Fuel Moisture Code (Van Wagner and Pickett 1985, equations 1 to 10, from Open-Meteo temperature, humidity, wind and rain of the last week), turned into a spread factor with equation 25; the Canadian wind function is left out because the model already has its own wind effect.
+
+On the Kabylie hotspot hindcast (8 to 14 August 2021, 263 zone-steps that grew) it **did not help**. The two scores below do not change when every prediction is scaled by the same factor, so they test whether the weather term tells fast from slow zones, not the overall level:
+
+| | rank correlation, predicted vs observed growth | spread of log10(predicted/observed) |
+|---|---|---|
+| without fuel | 0.38 | 0.95 |
+| with fuel | 0.14 | 1.22 |
+
+The fuel factor was between 0.36 and 8.0 (median 6.8): in that very dry week most zones got a similar, large factor, so it added noise. This is one event and a rough reference (hotspots), so it does not prove that fuel moisture never matters, and FFMC was built for Canadian pine forest. The code stays behind `--fuel`, off by default, and should only be used after it has been checked on a second event.
+
 ## Check against the real burned area (Copernicus EMSR533, Kabylie)
 Anes's table of burned areas mapped on 12, 13, 14, 15 and 16 August 2021 (`docs/emsr533_burned_area.md`) gives the real growth: about 283 ha/h from 12 to 13 August (peak), then 94, 20 and 15 ha/h. `python scripts/compare_emsr533.py` starts from the area mapped on each date, grows it with the model until the next mapping, and solves for the rate factor that would match:
 
@@ -78,7 +90,7 @@ Anes's table of burned areas mapped on 12, 13, 14, 15 and 16 August 2021 (`docs/
 | `WIND_ADJUSTMENT` | 0.4 | 10 m wind to flame-height wind |
 
 ## Limits (for the report)
-- Not a physical model: no slope, no fuel moisture, no spotting, no firefighting, wind held constant for the whole forecast.
+- Not a physical model: no slope, no fuel moisture (tried, see above: it did not help), no spotting, no firefighting, wind held constant for the whole forecast.
 - The starting shape is a circle, so the real shape of the zone is ignored.
 - One vegetation type per run: the repo has no land-cover layer yet.
 - Wind is a weather-model value, not measured at the fire.
