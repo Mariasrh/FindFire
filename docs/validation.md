@@ -14,10 +14,10 @@ Wildfires in Algeria are heavily concentrated in the Mediterranean summer (July�
 Under FindFire's state machine (`INACTIVE = pd.Timedelta(days=3)` in `src/findfire/live/pipeline.py`), any tracked fire zone that receives no new satellite hotspot detections within **72 hours** is classified as `inactive`. The operational dashboard intentionally filters out inactive zones to keep responders focused exclusively on immediate threats. Consequently, running live ingestion today (`python scripts/run_live.py --once --no-mtg --firms-days 5` yielding 660 raw FIRMS detections and 9 localized zones, most inactive) correctly shows few or no active zones on the map. This reflects accurate seasonal behavior, not a defect.
 
 ### One Unified Story: Replay & Validation Alignment
-Because an operational demonstration cannot rely on a live catastrophic wildfire occurring on demo day, the system architecture feeds real archived satellite detections through the exact same production pipeline:
+Because an operational demonstration cannot rely on a live wildfire occurring on demo day, the system architecture feeds real archived satellite detections through the exact same production pipeline:
 
-1. **Demonstration Replay**: Replays real, archived detections from Algeria's largest wildfire disaster—the **Kabylie wildfire complex of August 8–14, 2021**—step by step through the pipeline. The dashboard behaves dynamically as if the event were occurring live: early MTG warnings trigger alerts, VIIRS passes cluster into expanding fire zones, the F6 elliptical spread model projects growth, and nearest fire stations calculate water and truck requirements.
-2. **Quantitative Validation**: The performance metrics table (precision, recall, alert lead time, latency, and false-alarm suppression) is derived directly from this exact same August 2021 Kabylie event against independent ground-truth mapping from the Copernicus Emergency Management Service (**EMSR533**).
+1. **Demonstration Replay**: Replays real, archived detections from the **Kabylie wildfire complex of August 8–14, 2021** step by step through the pipeline. The dashboard behaves dynamically as if the event were occurring live: early MTG warnings trigger alerts, VIIRS passes cluster into expanding fire zones, the F6 elliptical spread model projects growth, and nearest fire stations calculate water and truck requirements.
+2. **Quantitative Validation**: The performance metrics table (precision, recall, alert lead time, latency, and false-alarm suppression) is evaluated on this exact same August 2021 Kabylie event against independent ground-truth mapping from the Copernicus Emergency Management Service (**EMSR533**).
 
 By using the August 2021 Kabylie event for both the interactive demonstration and the empirical validation, the demo and the reported numbers tell **one coherent, rigorous, and verifiable story**.
 
@@ -27,15 +27,15 @@ By using the August 2021 Kabylie event for both the interactive demonstration an
 
 All values below are benchmarked on the August 2021 Kabylie wildfire complex (EMSR533 reference), matching the replay demonstration dataset.
 
-| Metric | Measured Value / Range | Baseline / Reference | Method / Evaluation Source | Operational Significance |
+| Metric | Measured Value / Range | Baseline / Reference | Method / Evaluation Source | Notes |
 |---|---|---|---|---|
-| **Precision** | **63.0% – 70.0%** (mean: 67.6%) | Copernicus EMS EMSR533 ground truth | Overlap of cumulative VIIRS zones with CEMS optical burn scar | Minimizes wasted firefighting resources; precision climbs as fire perimeter consolidates. |
-| **Recall** | **65.0% – 66.0%** (mean: 65.8%) | Copernicus EMS EMSR533 ground truth | Share of reference CEMS burned scar enclosed by tracked zones | High and uniform across all 5 Copernicus monitoring products; captures major active fronts. |
-| **IoU (Jaccard Index)** | **0.47 – 0.51** (mean: 0.50) | Copernicus EMS EMSR533 ground truth | Intersection over Union (\(\frac{Z \cap R}{Z \cup R}\)) | Exceeds the standard satellite burned-area segmentation benchmark of ~0.40. |
-| **Alert Lead Time** | **30 – 180+ min** (median ~120 min) | Polar VIIRS pass (~12 h cycle) | Geostationary MTG FCI rapid scan (every 10 min) confirmed by later VIIRS overpass | Provides incident commanders hours of early warning before low Earth orbit passes occur. |
-| **Data Latency (VIIRS)** | **~90 – 120 min** (median, NRT) | Ingestion timestamp vs acquisition | Measured via `latency_minutes` (`ingested_at - acq_dt`) | Polar satellite downlinks and FIRMS NRT processing turnaround. |
-| **Data Latency (MTG)** | **~15 – 30 min** (median) | EUMETSAT Data Store stream | Granule acquisition to eumdac ingest | High-cadence geostationary data stream triggers rapid alerts. |
-| **False Alerts Removed (Archive)** | **536 / 11,614 hotspots** (4.6%), **26 false zones** | Raw FIRMS archive data | `vegetation_only` filter using FIRMS standard `type` column | Eliminates active volcanoes, offshore points, and known industrial heat emitters. |
+| **Precision** | **63.0% – 70.0%** (mean: 67.6%) | Copernicus EMS EMSR533 ground truth | Overlap of cumulative sum of VIIRS zones with CEMS optical burn scar | Precision increases as fire perimeter consolidates. |
+| **Recall** | **65.0% – 66.0%** (mean: 65.8%) | Copernicus EMS EMSR533 ground truth | Share of reference CEMS burned scar covered by sum of tracked zones | Uniform across all 5 Copernicus monitoring products. |
+| **IoU (Jaccard Index)** | **0.47 – 0.51** (mean: 0.50) | Copernicus EMS EMSR533 ground truth | Intersection over Union (\(\frac{Z \cap R}{Z \cup R}\)) | Geometric agreement between zone footprints and optical scar. |
+| **Alert Lead Time** | **Not measured: no MTG data in 2021.** | Polar VIIRS pass (~12 h cycle) | Evaluated on 2021 historical event | MTG-I1 launched in December 2022; no operational MTG data exists for August 2021. |
+| **Data Latency (VIIRS)** | **Within 3 hours** (NASA FIRMS) | Acquisition to NRT distribution | NASA FIRMS documented NRT latency | Documented turnaround for FIRMS NRT active fire data ([NASA FIRMS](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms)). |
+| **Data Latency (MTG)** | **Not measured.** | EUMETSAT Data Store stream | Pre-operational stream | Not available for the August 2021 benchmark event. |
+| **False Alerts Removed (Archive)** | **536 / 11,614 hotspots** (4.6%), **26 false zones** | Raw FIRMS archive data | `vegetation_only` filter using FIRMS standard `type` column | Eliminates active volcanoes, offshore points, and static industrial emitters. |
 | **False Alerts Removed (Live NRT)** | **519 / 536 industrial points** (96.8%), **29 false zones** | Raw type-less NRT stream | Spatial exclusion via `static_sources.csv` (85 multi-day flare clusters) | Cuts zone count from 180 to 151 with **zero reduction** in EMSR533 recall (0.658) or precision (0.676). |
 
 ---
@@ -44,29 +44,33 @@ All values below are benchmarked on the August 2021 Kabylie wildfire complex (EM
 
 The quantitative reference for burned-area extent is Copernicus Emergency Management Service activation **[EMSR533](https://mapping.emergency.copernicus.eu/activations/EMSR533/)** (August 2021 Kabylie wildfires, AOI01 Tizi Ouzou).
 
-Copernicus mapped the burned scar using high-resolution optical satellite imagery (Sentinel-2B, SPOT 6/7) across five published vector products. Tracked VIIRS zones are evaluated at the first 12-hour tracking step at or after each satellite observation time:
+Copernicus mapped the burned scar using optical satellite imagery (Sentinel-2B, SPOT 6/7) across five published vector products. Tracked VIIRS zones are evaluated at the first 12-hour tracking step at or after each satellite observation time:
 
-| Product | Imagery Source | Observation (UTC) | Tracking Step (UTC) | CEMS Reference (ha) | Our Zones (ha) | Recall | Precision | IoU | Ref Match |
-|---|---|---|---|---|---|---|---|---|---|
-| **Delineation** | Sentinel-2B (v2) | 2021-08-12 10:40 | 2021-08-12 12:00 | 46,361.5 ha | 48,013.0 ha | **0.65** | **0.63** | **0.47** | Pass |
-| **Monit01** | SPOT 7 | 2021-08-13 10:27 | 2021-08-13 12:00 | 53,094.0 ha | 51,896.6 ha | **0.66** | **0.67** | **0.50** | Pass |
-| **Monit02** | SPOT 6 | 2021-08-14 10:21 | 2021-08-14 12:00 | 55,337.1 ha | 52,900.2 ha | **0.66** | **0.69** | **0.51** | Pass |
-| **Monit03** | SPOT 7 | 2021-08-15 10:12 | 2021-08-15 12:00 | 55,805.4 ha | 53,155.0 ha | **0.66** | **0.69** | **0.51** | Pass |
-| **Monit04** | SPOT 6/7 | 2021-08-16 10:06 | 2021-08-16 12:00 | 56,158.0 ha | 53,155.0 ha | **0.66** | **0.70** | **0.51** | Pass |
+| Product | Imagery Source | Observation (UTC) | Tracking Step (UTC) | CEMS Reference (ha) | Our Zones (ha) | Recall | Precision | IoU |
+|---|---|---|---|---|---|---|---|---|
+| **Delineation** | Sentinel-2B (v2) | 2021-08-12 10:40 | 2021-08-12 12:00 | 46,361.5 ha | 48,013.0 ha | **0.65** | **0.63** | **0.47** |
+| **Monit01** | SPOT 7 | 2021-08-13 10:27 | 2021-08-13 12:00 | 53,094.0 ha | 51,896.6 ha | **0.66** | **0.67** | **0.50** |
+| **Monit02** | SPOT 6 | 2021-08-14 10:21 | 2021-08-14 12:00 | 55,337.1 ha | 52,900.2 ha | **0.66** | **0.69** | **0.51** |
+| **Monit03** | SPOT 7 | 2021-08-15 10:12 | 2021-08-15 00:00* | 55,805.4 ha | 53,155.0 ha | **0.66** | **0.69** | **0.51** |
+| **Monit04** | SPOT 6/7 | 2021-08-16 10:06 | 2021-08-15 00:00* | 56,158.0 ha | 53,155.0 ha | **0.66** | **0.70** | **0.51** |
+
+*\*Note on Monit03 and Monit04*: Our local FIRMS archive file (`viirs_2021-08-08_2021-08-14.csv`) ends on 14 August at 13:15 UTC. Consequently, our tracked zones remain frozen at 53,155 ha for Monit03 (15 Aug) and Monit04 (16 Aug), evaluated at the last available tracking step.
 
 ### Performance Insights
-1. **Recall Stability (~66%)**: Using 375 m thermal anomalies alone, the tracking pipeline recovers two-thirds of the total ground scar mapped by sub-10 m optical sensors. Unmapped portions correspond to low-intensity smoldering under canopy between overpasses.
+1. **Recall Stability (~66%)**: Using 375 m thermal anomalies alone, the tracking pipeline detects about two-thirds of the total ground scar mapped by sub-10 m optical sensors.
 2. **Precision Improvement (63% \(\to\) 70%)**: As the fire reaches its containment boundary and interior unburned pockets fill in over successive overpasses, geometric agreement between our alpha-shape cumulative footprints and optical scars steadily increases.
-3. **Burned Extent Accuracy**: At final observation (Monit04), the tracked area reaches **53,155 ha** against the official Copernicus mapped scar of **56,158 ha** (~94.6% agreement in total burned extent).
+3. **Burned Extent Comparison**: At final observation (Monit04), total areas are close (53,155 vs 56,158 ha) but about two thirds overlap (recall 0.66).
 
 ---
 
 ## 4. Mathematical Formulation
 
-All spatial metrics are calculated in local metric projection (UTM Zone 31N, EPSG:32631) clipped strictly within the Copernicus AOI polygon \(A\):
+All spatial metrics are calculated in local metric projection (UTM Zone 31N, EPSG:32631) clipped strictly within the Copernicus AOI01 polygon \(A\):
 
 $$R = \text{CEMS Reference Burned Area} \cap A$$
-$$Z = \text{Tracked Fire Zones} \cap A$$
+$$Z = \text{Union of Tracked Fire Zones} \cap A$$
+
+*Note: \(Z\) is the spatial union (sum) of all our tracked zones inside AOI01, not a single individual zone.*
 
 - **Recall**: Completeness of burned-area detection:
   $$\text{Recall} = \frac{\text{Area}(Z \cap R)}{\text{Area}(R)}$$
@@ -82,14 +86,14 @@ $$Z = \text{Tracked Fire Zones} \cap A$$
 ## 5. Alert Lead Time & Ingestion Latency
 
 ### Alert Lead Time (MTG FCI \(\to\) VIIRS)
-- **Early Warning Mechanism**: MTG (Flexible Combined Imager) observes Algeria every **10 minutes** at 2 km resolution, whereas polar VIIRS instruments (Suomi-NPP, NOAA-20, NOAA-21) pass only 2–3 times per day (~12-hour intervals).
-- **Lead Time Metric**: When an MTG alert cluster (\(\ge 2\) consecutive scans) is confirmed by a subsequent VIIRS hotspot:
+- **Status on Benchmark Event**: **Not measured: no MTG data in 2021.**
+- **Context**: Meteosat Third Generation (MTG-I1) was launched on December 13, 2022. No MTG active fire observations exist for the August 2021 Kabylie fire event.
+- **Pipeline Implementation**: In the live operational pipeline (`src/findfire/live/pipeline.py`), MTG alert lead time is measured dynamically whenever an MTG alert cluster (\(\ge 2\) consecutive scans) is confirmed by a subsequent VIIRS hotspot:
   $$\Delta t_{\text{lead}} = t_{\text{VIIRS confirmation}} - t_{\text{MTG first detected}}$$
-- **Operational Impact**: During the August 2021 Kabylie event, MTG alerts consistently preceded VIIRS zone creation by **30 to 180+ minutes** (median ~2 hours), providing civil protection crews valuable lead time for initial staging.
 
-### Ingestion Latency Breakdown
-- **VIIRS NRT**: End-to-end latency from satellite overpass to FIRMS NRT ingest is **~90 to 120 minutes** (median) and ~180 minutes (P90).
-- **MTG Live Stream**: Processing from scan completion to EUMETSAT Data Store distribution is **~15 to 30 minutes**.
+### Ingestion Latency
+- **VIIRS NRT**: **Within 3 hours** ([NASA FIRMS Documentation](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms)). NASA FIRMS specifies that standard Near-Real-Time (NRT) active fire detections from Suomi-NPP and NOAA-20 are processed and distributed within 3 hours of satellite overpass.
+- **MTG Live Stream**: **Not measured** on this historical event.
 
 ---
 
@@ -107,8 +111,9 @@ Raw satellite detections frequently detect industrial heat sources (oil & gas fl
 - **Verification on Replay Data**: Evaluated on type-less Kabylie data, the static mask filters out **519 out of 536 industrial hotspots (96.8%)** and reduces zone count from **180 to 151** (29 false zones removed), with **zero impact** on EMSR533 recall (0.658) or precision (0.676).
 
 ### 3. Overpass Redetection Deduplication (`mark_redetections`)
-- Suomi-NPP, NOAA-20, and NOAA-21 overpass the same area within 30–50 minutes of each other.
-- `mark_redetections` links duplicate detections of the same pixel by partner satellites within 1.5 hours to the earlier primary detection, preventing redundant flares from erroneously forming multi-point fire clusters.
+- In August 2021, two VIIRS instruments were operational: Suomi-NPP and NOAA-20 (NOAA-21 was launched later, in November 2022).
+- Suomi-NPP and NOAA-20 pass over the same area within ~50 minutes of each other.
+- The `mark_redetections` filter links subsequent observations of the same pixel by a partner satellite within **3.0 hours** (`REDETECTION_H = 3.0` in `src/findfire/config.py`) to the earlier primary detection, preventing redundant detections of the same fire front from creating separate, duplicated clusters.
 
 ---
 
