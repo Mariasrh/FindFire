@@ -31,7 +31,11 @@ import pandas as pd
 from shapely.geometry import mapping, shape
 
 from findfire.config import DATA_DIR
-from findfire.landcover.worldcover import annotate_zones
+from findfire.landcover.worldcover import VERSIONS, annotate_zones
+
+
+from findfire.landcover.worldcover import VERSIONS, annotate_zones
+
 
 OBSERVED = ["crop", "forest", "scrub", "grass", "built-up", "bare", "other", "mixed", "unsure"]
 RISKY = {"mixed", "review"}
@@ -92,10 +96,11 @@ def main():
     ap.add_argument("--out", default=str(DATA_DIR / "results" / "landcover_validation.html"))
     ap.add_argument("--n", type=int, default=20, help="zones to check (risky zones are always included)")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--year", type=int, default=2021, choices=sorted(VERSIONS),
+                    help="WorldCover year; 2020 for the Aug 2021 Kabylie validation")
     ap.add_argument("--tiles"); ap.add_argument("--no-remote", action="store_true")
     ap.add_argument("--csv-in", help="score a finished check instead of building the page")
     a = ap.parse_args()
-
     if a.csv_in:
         return score(a.csv_in)
 
@@ -103,7 +108,7 @@ def main():
     zones = [dict(f["properties"], geometry=shape(f["geometry"])) for f in state["zones"]]
     if not zones:
         raise SystemExit("no zones in the state file")
-    annotate_zones(zones, a.tiles, remote=not a.no_remote)
+    annotate_zones(zones, a.tiles, remote=not a.no_remote, year=a.year)
     missing = sum(1 for z in zones if not z.get("land_cover"))
     chosen = sample(zones, a.n, a.seed)
     if not chosen:
