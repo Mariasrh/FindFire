@@ -21,6 +21,8 @@ a.add_argument("--no-forecast", action="store_true")
 a.add_argument("--wind", nargs=2, type=float, metavar=("SPEED_MS", "FROM_DEG"))
 a = a.parse_args()
 
+from findfire.dashboard import server as server_module
+server_module.WIND_CACHE_PATH = DATA_DIR / "archive" / "wind_cache.json"   # past winds are kept: a replay then works offline
 dashboard = Dashboard(a.state, a.stations, a.vegetation, tuple(a.wind) if a.wind else None, not a.no_forecast)
 server = make_server(dashboard, port=a.port)
 print(f"Dashboard on http://127.0.0.1:{a.port}  (state: {a.state})  Ctrl+C to stop")
