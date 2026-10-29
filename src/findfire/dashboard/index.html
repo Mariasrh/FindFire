@@ -55,7 +55,7 @@
   <span id="sample">SAMPLE DATA, not real detections</span>
   <span id="replay"></span>
   <span id="meta">loading...</span>
-  <label class="chk"><input type="checkbox" id="onlySpreading" checked> only zones still spreading</label>
+  <label class="chk"><input type="checkbox" id="onlySpreading" checked> cards and alerts: only zones still spreading</label>
   <select id="stationSel"><option value="">All stations (command center)</option></select>
   <button id="sound">Enable sound</button>
 </header>
@@ -79,6 +79,7 @@ let onlySpreading = true;     // hide zones with no new hotspot in the last step
 let lastOpts = null, lastData = null, stationsById = {};
 let map = null, zoneLayer = null, stationLayer = null, lineLayer = null, fitted = false;
 let lastMapSig = null;
+let known = {};               // every zone seen since the page opened (or the replay restarted)
 let showAll = false;        // show every zone or only the first MAX_CARDS
 const MAX_CARDS = 12;
 let lastStep = null;        // replay step of the previous answer
@@ -107,9 +108,13 @@ byId("sound").onclick = () => {
   byId("sound").textContent = "Sound on"; beep();
 };
 setInterval(() => { if (pending.length && soundOn) beep(); }, 8000);   // repeat until acknowledged
+function byStation(cards) {
+  return station === "" ? cards : cards.filter(c => (c.involved_station_ids || []).map(String).includes(station));
+}
+
 function mine(cards) {
-  const byStation = station === "" ? cards : cards.filter(c => (c.involved_station_ids || []).map(String).includes(station));
-  return onlySpreading ? byStation.filter(c => c.spreading !== false) : byStation;
+  const list = byStation(cards);
+  return onlySpreading ? list.filter(c => c.spreading !== false) : list;
 }
 
 function alertLine(c) {
@@ -189,16 +194,27 @@ function drawMap(cards, data) {
     L.circleMarker([s.latitude, s.longitude], {radius: 4, color: "#0b3d91", weight: 1, fillColor: "#4da3ff", fillOpacity: 0.9})
       .bindTooltip(esc(s.name) + " | " + s.zones + " zone(s), " + s.trucks + " truck(s)").addTo(stationLayer);
   });
+  const activeIds = new Set(cards.map(c => c.zone_id));
+  if (station === "") {                                  // zones seen earlier that are no longer active stay on the map
+    Object.values(known).filter(k => !activeIds.has(k.zone_id)).forEach(k => {
+      L.circleMarker([k.latitude, k.longitude], {radius: 4, color: "#555555", weight: 1, fillColor: "#8a8f98", fillOpacity: 0.5})
+        .bindTooltip("Zone #" + esc(k.zone_id) + ": no recent detection, or merged into a larger zone (last seen " + num(k.area_ha, 0) + " ha)")
+        .addTo(zoneLayer);
+    });
+  }
   cards.forEach(c => {
     const fresh = pending.includes(c.zone_id);
+    const watch = c.spreading === false;
     const radius = Math.max(5, Math.min(22, 3 + 3 * Math.log10(Math.max(c.area_ha, 1))));
-    L.circleMarker([c.latitude, c.longitude], {radius: radius, color: fresh ? "#ffffff" : "#7f0000", weight: fresh ? 3 : 1,
-      fillColor: "#e53935", fillOpacity: 0.75})
-      .bindTooltip("Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 0) + " ha | click: stations")
-      .bindPopup(popupHtml(c), {maxWidth: 340}).on("click", () => showLines(c)).addTo(zoneLayer);
+    L.circleMarker([c.latitude, c.longitude], {radius: radius, color: fresh ? "#ffffff" : watch ? "#b71c1c" : "#7f0000",
+      weight: fresh ? 3 : 1, dashArray: watch ? "3 3" : null, fillColor: watch ? "#b34747" : "#e53935", fillOpacity: watch ? 0.35 : 0.75})
+      .bindTooltip("Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 0) + " ha" + (watch ? " | watch only" : " | click: details"))
+      .bindPopup(typeof popupHtml === "function" ? popupHtml(c) : "Zone #" + esc(c.zone_id), {maxWidth: 340})
+      .on("click", () => showLines(c)).addTo(zoneLayer);
   });
   if (!fitted && cards.length) { map.fitBounds(L.latLngBounds(cards.map(c => [c.latitude, c.longitude])).pad(0.2), {maxZoom: 9}); fitted = true; }
 }
+
 function areaChange(c) {
   if (c.area_change_ha === null || c.area_change_ha === undefined) return "";
   if (c.area_change_ha === 0) return ' <small class="chg">no change</small>';
@@ -249,8 +265,9 @@ function render(data) {
   const all = data.cards || [];
   const ids = all.filter(c => c.spreading !== false).map(c => c.zone_id);      // only zones still spreading raise alerts
   const step = data.replay ? data.replay.step : null;
-  if (step !== null && lastStep !== null && step < lastStep) { seen = new Set(); pending = []; }   // replay restarted
+  if (step !== null && lastStep !== null && step < lastStep) { seen = new Set(); pending = []; known = {}; }   // replay restarted
   lastStep = step;
+  all.forEach(c => { known[c.zone_id] = {zone_id: c.zone_id, latitude: c.latitude, longitude: c.longitude, area_ha: c.area_ha}; });
   if (seen === null) { seen = new Set(ids); }                     // first answer: no alert for what already exists
   else {
     let fresh = false;
@@ -271,17 +288,19 @@ function render(data) {
   byId("replay").style.display = rp ? "inline-block" : "none";
   if (rp) byId("replay").textContent = "REPLAY " + String(rp.time).replace("T", " ").slice(0, 16) + " UTC, step " + rp.step + "/" + rp.steps;
   const d = data.dispatch || {};
-  const notSpreading = onlySpreading ? all.filter(c => c.spreading === false).length : 0;
-  byId("meta").textContent = cards.length + " active zone(s) shown, " + (data.inactive || 0) + " inactive hidden"
-    + (notSpreading ? ", " + notSpreading + " not spreading hidden" : "")
+  const nSpreading = all.filter(c => c.spreading !== false).length, nWatch = all.length - nSpreading;
+  const nKnown = Object.keys(known).length;
+  byId("meta").textContent = "Detected so far " + nKnown + ": " + nSpreading + " spreading, " + nWatch + " watch only, "
+    + (nKnown - all.length) + " no longer active"
     + (d.trucks_total ? ". Trucks engaged " + d.trucks_engaged + "/" + d.trucks_total + ", zones not fully covered " + ((d.partly_served || 0) + (d.not_served || 0)) : "")
     + ". Updated " + new Date().toLocaleTimeString();
   byId("notes").innerHTML = (data.warnings || []).concat(data.errors || []).map(w => "<div>" + esc(w) + "</div>").join("");
   byId("empty").style.display = cards.length ? "none" : "block";
-  const sig = JSON.stringify([station, onlySpreading, step, cards.map(c => [c.zone_id, c.area_ha, pending.includes(c.zone_id)])]);
-  if (sig !== lastMapSig) {                                       // redraw only when something changed, so a popup stays open
+  const mapCards = byStation(all);                      // the map shows every active zone, spreading or not
+  const sig = JSON.stringify([station, step, Object.keys(known).length, mapCards.map(c => [c.zone_id, c.area_ha, c.spreading, pending.includes(c.zone_id)])]);
+  if (sig !== lastMapSig) {                              // redraw only when something changed, so a popup stays open
     lastMapSig = sig;
-    try { drawMap(cards, data); } catch (err) { drawFallback(cards); }
+    try { drawMap(mapCards, data); } catch (err) { drawFallback(mapCards); }
   }
   const shown = showAll ? cards : cards.slice(0, MAX_CARDS);
   byId("cards").innerHTML = shown.map(card).join("") + (cards.length > MAX_CARDS
