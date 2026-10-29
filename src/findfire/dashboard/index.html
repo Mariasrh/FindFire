@@ -18,6 +18,8 @@
   #mapbox { padding:14px 18px 0; }
   #map { height:380px; border:1px solid var(--line); border-radius:10px; background:#0b0d12; }
   .nomap { padding:20px; color:var(--muted); }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 18px; padding:8px 2px 0; font-size:12px; color:var(--muted); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   .leaflet-container { background:#0b0d12; }
   .chk { font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
   .chg { font-size:11px; color:var(--medium); font-weight:600; margin-left:6px; }
@@ -62,7 +64,15 @@
 <div id="banner"></div>
 <div id="notes"></div>
 <div id="empty">No active fire zone.</div>
-<div id="mapbox"><div id="map"></div></div>
+<div id="mapbox"><div id="map"></div>
+  <div class="legend">
+    <span><i class="dot" style="background:#e53935"></i> still spreading</span>
+    <span><i class="dot" style="background:#b34747;opacity:.5;border:1px dashed #b71c1c"></i> watch only (no new hotspot)</span>
+    <span><i class="dot" style="background:#8a8f98"></i> no longer active or merged</span>
+    <span><i class="dot" style="background:#4da3ff"></i> engaged station</span>
+    <span>white ring = alert not acknowledged | click a red dot for details</span>
+  </div>
+</div>
 <main id="cards"></main>
 <footer>
   Water, pump and growth parameters are placeholders to be confirmed with the Protection Civile. Trucks per station
