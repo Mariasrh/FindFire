@@ -38,13 +38,16 @@ class Store:
         old = self.load(name)
         if new is None or new.empty:
             return 0
-        new = new.copy(); new["ingested_at"] = now
+        new = new.copy(); new["ingested_at"] = now; new["_new"] = True
+        if len(old):
+            old = old.assign(_new=False)
         both = pd.concat([old, new], ignore_index=True) if len(old) else new
         both["acq_dt"] = pd.to_datetime(both["acq_dt"], utc=True)
         both = both.drop_duplicates(subset=KEY, keep="first")
         both = both[both["acq_dt"] >= now - self.keep].sort_values("acq_dt")
-        both.to_csv(self._csv(name), index=False)
-        return len(both) - len(old)
+        added = int(both["_new"].fillna(False).astype(bool).sum())   # new rows still kept, never negative
+        both.drop(columns="_new").to_csv(self._csv(name), index=False)
+        return added
 
     def watermarks(self) -> dict:
         p = self.dir / "watermarks.json"
