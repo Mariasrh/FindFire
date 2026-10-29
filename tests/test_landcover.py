@@ -2,8 +2,6 @@ from datetime import date
 
 import numpy as np
 import pytest
-import rasterio
-from rasterio.transform import from_origin
 from shapely.geometry import box
 
 from findfire.landcover.worldcover import (DEFAULT_YEAR, LandCoverUnavailable, annotate_zones, base_url, summarise,
@@ -13,7 +11,10 @@ PX = 0.0001                                                   # ~11 m, close to 
 
 
 def write_tile(folder, tile, west, north, array, year=DEFAULT_YEAR):
-    """A tiny stand-in GeoTIFF (EPSG:4326) saved under the real WorldCover file name of `year`."""
+    """A tiny stand-in GeoTIFF (EPSG:4326) saved under the real WorldCover file name of `year`.
+    Skips the calling test when rasterio is not installed (pip install -r requirements-landcover.txt)."""
+    rasterio = pytest.importorskip("rasterio")
+    from rasterio.transform import from_origin
     h, w = array.shape
     with rasterio.open(folder / tile_filename(tile, year), "w", driver="GTiff", height=h, width=w, count=1, dtype="uint8",
                        crs="EPSG:4326", transform=from_origin(west, north, PX, PX)) as dst:
@@ -64,6 +65,7 @@ def test_a_zone_across_a_tile_boundary_combines_both_tiles(tmp_path):
 
 
 def test_missing_tile_raises_instead_of_guessing(tmp_path):
+    pytest.importorskip("rasterio")                           # the tile read itself needs rasterio
     with pytest.raises(LandCoverUnavailable):
         zone_land_cover(box(4.0, 36.0, 4.01, 36.01), tmp_path, remote=False)
 

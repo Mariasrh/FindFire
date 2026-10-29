@@ -93,9 +93,9 @@ def _tiles_for(geom) -> list[str]:
 
 
 def _counts(geom, source_dir: Path | None, remote: bool, year: int = DEFAULT_YEAR) -> dict[int, int]:
+    _version(year)                                                      # fail early on an unknown year (needs no rasterio)
     import rasterio
     import rasterio.mask
-    _version(year)                                                      # fail early on an unknown year
     counts: dict[int, int] = {}
     for tile in _tiles_for(geom):
         part = geom.intersection(_tile_box(tile))
