@@ -78,6 +78,7 @@ let station = "";            // selected station id, "" = command center (all st
 let onlySpreading = true;     // hide zones with no new hotspot in the last step
 let lastOpts = null, lastData = null, stationsById = {};
 let map = null, zoneLayer = null, stationLayer = null, lineLayer = null, fitted = false;
+let lastMapSig = null;
 let showAll = false;        // show every zone or only the first MAX_CARDS
 const MAX_CARDS = 12;
 let lastStep = null;        // replay step of the previous answer
@@ -160,6 +161,21 @@ function drawFallback(cards) {
     + '<text x="12" y="' + (H - 10) + '" fill="#9aa0a6" font-size="12">Offline: no basemap, positions only</text></svg>';
 }
 
+function popupHtml(c) {
+  const lead = c.lead_station || {};
+  const rows = (c.assignments || []).slice(0, 6).map(a => "<li>" + esc(a.station) + ": " + num(a.trucks) + " truck(s), arrival "
+    + minutes(a.eta_min) + " (" + esc(a.role) + ")</li>").join("");
+  const change = c.area_change_ha === null || c.area_change_ha === undefined ? ""
+    : " (" + (c.area_change_ha > 0 ? "+" : "") + num(c.area_change_ha, 1) + " ha since last update)";
+  const arrival = c.flow_at_arrival_l_min === undefined ? "" : ", " + num(c.flow_at_arrival_l_min) + " L/min when the first truck arrives (in " + minutes(c.arrival_min) + ")";
+  const missing = c.needs_reinforcement ? " <b>missing " + num(c.unmet_trucks) + ", ask mutual aid</b>" : "";
+  return "<b>Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + "</b><br>" + num(c.area_ha, 1) + " ha" + change
+    + "<br>Water: " + num(c.flow_l_min) + " L/min now" + arrival
+    + "<br>Alert sent to: " + esc(lead.name || c.nearest_station)
+    + "<br>Trucks: " + num(c.trucks_sent) + " sent of " + num(c.trucks_needed_now) + " needed" + missing
+    + (rows ? "<ul>" + rows + "</ul>" : "");
+}
+
 function drawMap(cards, data) {
   if (typeof L === "undefined") { drawFallback(cards); return; }
   if (!map) {
@@ -179,7 +195,7 @@ function drawMap(cards, data) {
     L.circleMarker([c.latitude, c.longitude], {radius: radius, color: fresh ? "#ffffff" : "#7f0000", weight: fresh ? 3 : 1,
       fillColor: "#e53935", fillOpacity: 0.75})
       .bindTooltip("Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 0) + " ha | click: stations")
-      .on("click", () => showLines(c)).addTo(zoneLayer);
+      .bindPopup(popupHtml(c), {maxWidth: 340}).on("click", () => showLines(c)).addTo(zoneLayer);
   });
   if (!fitted && cards.length) { map.fitBounds(L.latLngBounds(cards.map(c => [c.latitude, c.longitude])).pad(0.2), {maxZoom: 9}); fitted = true; }
 }
@@ -211,11 +227,12 @@ function card(c) {
     + "<div><span>Area now</span><b>" + num(c.area_ha, 1) + " ha</b>" + areaChange(c) + "</div>"
     + "<div><span>Status</span><b>" + esc(c.status) + "</b></div>"
     + "<div><span>Water flow</span><b>" + num(c.flow_l_min) + " L/min</b></div>"
-    + "<div><span>Water, 60 min</span><b>" + num(c.volume_l) + " L</b></div>"
+    + "<div><span>Water needed on arrival" + (c.arrival_min === undefined ? "" : " (in " + minutes(c.arrival_min) + ")") + "</span><b>"
+      + num(c.flow_at_arrival_l_min === undefined ? c.flow_l_min : c.flow_at_arrival_l_min) + " L/min</b></div>"
     + "<div><span>" + (c.monitoring ? "Nearest station (no alert)" : "Alert sent to (lead station)") + "</span><b>" + esc(lead.name || c.nearest_station) + "</b></div>"
     + "<div><span>Distance / arrival</span><b>" + num(lead.distance_km === undefined ? c.nearest_distance_km : lead.distance_km, 1) + " km / "
     + minutes(lead.eta_min === undefined ? c.nearest_eta_min : lead.eta_min) + "</b></div>"
-    + "<div><span>Trucks needed at once</span><b>" + num(c.trucks_needed_now) + " (sent " + num(c.trucks_sent) + ")</b></div>"
+    + "<div><span>Trucks needed on arrival</span><b>" + num(c.trucks_needed_now) + " (sent " + num(c.trucks_sent) + ")</b></div>"
     + "<div><span>Last truck arrives</span><b>" + minutes(c.eta_last_truck_min) + "</b></div>"
     + "<div><span>Tank autonomy</span><b>" + num(c.autonomy_min, 1) + " min</b></div>"
     + "<div><span>Reinforcement</span>" + reinforce + "</div>"
@@ -261,7 +278,11 @@ function render(data) {
     + ". Updated " + new Date().toLocaleTimeString();
   byId("notes").innerHTML = (data.warnings || []).concat(data.errors || []).map(w => "<div>" + esc(w) + "</div>").join("");
   byId("empty").style.display = cards.length ? "none" : "block";
-  try { drawMap(cards, data); } catch (err) { drawFallback(cards); }
+  const sig = JSON.stringify([station, onlySpreading, step, cards.map(c => [c.zone_id, c.area_ha, pending.includes(c.zone_id)])]);
+  if (sig !== lastMapSig) {                                       // redraw only when something changed, so a popup stays open
+    lastMapSig = sig;
+    try { drawMap(cards, data); } catch (err) { drawFallback(cards); }
+  }
   const shown = showAll ? cards : cards.slice(0, MAX_CARDS);
   byId("cards").innerHTML = shown.map(card).join("") + (cards.length > MAX_CARDS
     ? '<div class="more"><button id="toggleAll">' + (showAll ? "Show only the " + MAX_CARDS + " most severe" : "Show all " + cards.length + " zones") + "</button></div>" : "");

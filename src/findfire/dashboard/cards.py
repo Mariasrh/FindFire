@@ -8,6 +8,7 @@ Everything here is a pure function, so it can be tested without a server.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -15,6 +16,7 @@ from pyproj import Geod
 from shapely.geometry import shape
 
 from findfire.response import response_for_zone
+from findfire.stations.nearest_station import PUMP_L_MIN
 from findfire.dashboard.dispatch import dispatch
 from findfire.water.water_demand import compute_water_demand
 
@@ -59,6 +61,18 @@ def forecast_steps(entry: dict, terrain: str) -> list[dict]:
     return steps
 
 
+def flow_at(card: dict, minutes: float) -> float:
+    """Water flow (L/min) expected `minutes` from now, interpolated between now and the forecast steps."""
+    points = [(0.0, float(card["flow_l_min"]))] + [(float(s["minutes"]), float(s["flow_l_min"])) for s in card.get("forecast", [])]
+    points.sort()
+    if minutes <= points[0][0]:
+        return points[0][1]
+    for (t0, f0), (t1, f1) in zip(points, points[1:]):
+        if minutes <= t1:
+            return f0 + (f1 - f0) * (minutes - t0) / (t1 - t0)
+    return points[-1][1]
+
+
 def build_cards(zones: list[dict], stations: pd.DataFrame, forecast: list[dict] | None = None):
     """-> (cards, errors, n_inactive). One bad zone never hides the others."""
     by_zone = {f.get("zone_id"): f for f in (forecast or [])}
@@ -79,6 +93,11 @@ def build_cards(zones: list[dict], stations: pd.DataFrame, forecast: list[dict] 
             card["forecast"] = forecast_steps(entry, card["terrain"]) if entry else []
             card["wind"] = (dict(speed_ms=entry["wind_speed_ms"], from_deg=entry["wind_from_deg"],
                                  spread_to_deg=entry["spread_to_deg"]) if entry else None)
+            arrival = float(card["nearest_eta_min"])                 # the first truck arrives in this many minutes
+            card["arrival_min"] = arrival
+            card["flow_at_arrival_l_min"] = round(flow_at(card, arrival), 1)
+            card["trucks_needed_now"] = max(int(card["trucks_needed_now"]),
+                                            math.ceil(card["flow_at_arrival_l_min"] / PUMP_L_MIN))
             cards.append(card)
         except Exception as err:          # noqa: BLE001 - report it on the page instead of crashing
             errors.append(f"zone {zone.get('zone_id')}: {err}")
