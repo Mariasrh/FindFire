@@ -139,7 +139,7 @@ class Dashboard:
         with self._lock:
             if not self.state_path.exists():
                 return dict(sample=False, replay=None, n_zones=0, inactive=0, cards=[], errors=[],
-                            warnings=[f"state file not found: {self.state_path}. Run scripts/run_live.py first."])
+                            warnings=[f"state file not found: {self.state_path}. Waiting for data: start scripts/replay_to_state.py (replay) or scripts/run_live.py (live)."])
             mtime = self.state_path.stat().st_mtime
             if mtime == self._mtime and self._payload is not None:
                 return self._payload
