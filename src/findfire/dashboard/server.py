@@ -16,6 +16,7 @@ import pandas as pd
 from findfire.dashboard.cards import dashboard_payload, load_state, zones_from_state
 
 PAGE = Path(__file__).with_name("index.html")
+LOGO = Path(__file__).with_name("logo.png")
 DEFAULT_WIND = (3.0, 270.0)      # ASSUMPTION: m/s and FROM degrees, used only when no real wind is available
 
 
@@ -188,6 +189,8 @@ def make_server(dashboard: Dashboard, host="127.0.0.1", port=8000) -> ThreadingH
             path = self.path.split("?")[0]
             if path == "/":
                 self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif path == "/logo.png" and LOGO.exists():
+                self._send(200, LOGO.read_bytes(), "image/png")
             elif path == "/api/cards":
                 body = json.dumps(dashboard.payload(), default=_json_default).encode("utf-8")
                 self._send(200, body, "application/json; charset=utf-8")
