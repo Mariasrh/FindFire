@@ -1,39 +1,61 @@
 # References
 
-## Data sources
+## Satellite data
 
-### NASA FIRMS
-- Source used: VIIRS_NOAA20_NRT (375 m resolution)
-- Role: precise hotspot location and area
-- Access: area API with Algeria bounding box, MAP_KEY in .env
-- `type` field (standard-quality/archive products and saved CSVs only):
-  0 = presumed vegetation fire, 1 = active volcano, 2 = other static land source
-  (gas flares, refineries, industry), 3 = offshore.
-  Near-real-time (NRT) data has no `type`, so the vegetation-only filter
-  (`findfire.detection.filters.vegetation_only`, on by default via the `VEGETATION_ONLY` flag)
-  applies to archive and saved-CSV runs only; live NRT passes through unchanged.
-- Static-source mask (for live NRT): `scripts/build_static_mask.py` counts, from months of SP history,
-  the ~1 km cells that are hot on >= `--min-days` distinct days (gas flares, refineries, industry) and
-  writes `data/static_sources.csv`. `run_live.py` loads it via `load_exclusions(include_static=True)`,
-  so live NRT drops those permanent sources without needing a `type` field. Rebuild it once a year.
+**NASA FIRMS (VIIRS active fires)**
+- Sources: VIIRS near-real-time from Suomi-NPP, NOAA-20 and NOAA-21 (live), standard-processing archive for past events. 375 m pixels.
+- Access: FIRMS area API with the study box, `FIRMS_MAP_KEY` in `.env`.
+- Latency: near-real-time data within 3 hours of the satellite pass:
+  https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms
+- `type` field (archive and saved CSVs only): 0 vegetation fire, 1 active volcano, 2 other static land source
+  (gas flares, refineries, industry), 3 offshore. Near-real-time data has no `type`, so live runs use the
+  static-source mask instead (`scripts/build_static_mask.py` writes `data/static_sources.csv`).
 
-### EUMETSAT Data Store
-- Collection used: EO:EUM:DAT:0682, Active Fire Monitoring (netCDF), MTG
-- Role: fast and frequent detection that triggers the alert
-- Access: eumdac library, key and secret in .env
-- Other candidates: EO:EUM:DAT:0801 (CAP format),
-  EO:EUM:DAT:0417 (Sentinel-3 FRP)
-- TODO (Day 2): confirm resolution, update frequency, latency and
-  product format from the collection page
+**EUMETSAT MTG FCI Active Fire Monitoring**
+- Collection `EO:EUM:DAT:0682` (netCDF), 2 km at the sub-satellite point, one product every 10 minutes, pre-operational.
+- First MTG imager satellite (MTG-I1) launched in December 2022, so no MTG data exists for 2021.
+- Access: `eumdac`, `EUMETSAT_KEY` and `EUMETSAT_SECRET` in `.env`; reading needs `satpy`. https://data.eumetsat.int
 
-### Copernicus EMS (validation reference)
-- Activation EMSR533, August 2021 Kabylie fires, AOI01 Tizi Ouzou
-- Role: independent reference burned-area perimeter, for recall/precision/IoU
-- Access: free Vector Package (.zip) per product (Delineation, Monit01-04),
-  unzipped under data/emsr533/<Product>/ (not in git)
-- https://mapping.emergency.copernicus.eu/activations/EMSR533/
-- Products compared by scripts/validate_emsr.py at each product's observation time
-### Fire stations
-- Positions: OpenStreetMap contributors (ODbL), tag amenity=fire_station, downloaded with scripts/fetch_fire_stations.py.
-- Number of trucks (3) and tank capacity (4000 L) per station are ASSUMED: no public source found.
-- OSM coverage is incomplete and uneven, so some real stations are missing.
+**Copernicus Emergency Management Service, activation EMSR533** (validation reference)
+- August 2021 Kabylie fires, AOI01 Tizi Ouzou; products Delineation and Monit01 to Monit04, from Sentinel-2 and SPOT 6/7.
+- Vector packages unzipped under `data/emsr533/` (not in git). https://mapping.emergency.copernicus.eu/activations/EMSR533/
+
+## Weather
+
+**Open-Meteo**: forecast API (now and the last 60 days) and historical archive API (older dates), 10 m wind.
+No key for non-commercial use. https://open-meteo.com/en/docs and https://open-meteo.com/en/docs/historical-weather-api
+
+## Land cover
+
+**ESA WorldCover 10 m**, 2020 (v100) and 2021 (v200), CC BY 4.0. https://esa-worldcover.org
+Accuracy and limits: `docs/landcover.md`.
+
+## Maps and stations
+
+- Fire station positions: OpenStreetMap contributors (ODbL), tag `amenity=fire_station`, `scripts/fetch_fire_stations.py`.
+  Coverage is incomplete. Number of trucks and tank size are assumptions (below).
+- Online basemap: OpenStreetMap tiles (ODbL), darkened in the browser.
+  Tile usage policy: https://operations.osmfoundation.org/policies/tiles/
+- Offline map: coastline and borders from Natural Earth (public domain). https://www.naturalearthdata.com
+- Map library: Leaflet. https://leafletjs.com
+
+## Fire spread
+
+Ellipse model and length-to-breadth ratio (Anderson 1983; Finney 1998, FARSITE). Sources and calibration: `docs/forecast.md`.
+
+## Values without a source (ASSUMPTIONS)
+
+These numbers are placeholders chosen to make the system run. They must be confirmed with the Civil Protection before any real use.
+
+| Value | Used in | Now |
+|---|---|---|
+| Water per metre of attacked front | `water/water_demand.py` | forest 10, scrub 8, crop 5, urban 20 L/min per m |
+| Longest front attacked at once | `water/water_demand.py` | forest 2000, scrub 2000, crop 1500, urban 500 m |
+| Safety margin; extra margin when wind is 30 km/h or more | `water/water_demand.py` | x1.2; x1.2 |
+| Severity thresholds | `water/water_demand.py` | low under 10 ha, medium under 200 ha, critical above |
+| Pump flow per truck | `stations/nearest_station.py` | 2000 L/min |
+| Trucks per station, tank size | `data/fire_stations.csv` | 3 trucks, 4000 L |
+| Road speed and road factor (arrival time) | `stations/nearest_station.py` | 50 km/h, straight-line distance x 1.3 |
+| Longest arrival time for a reinforcement | `stations/nearest_station.py` | 60 min |
+| Spread rates and wind gain | `forecast/spread.py` | see `docs/forecast.md` |
+| Wind used when none is found for a date | `dashboard/server.py` | 3 m/s from the west, shown as a warning on the page |

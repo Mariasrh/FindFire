@@ -11,7 +11,7 @@ Tests: `tests/test_validation.py`, `tests/test_pipeline.py`, `tests/test_filters
 ### Wildfire Seasonality & Inactivity Logic
 Wildfires in Algeria are heavily concentrated in the Mediterranean summer (July–August). In late autumn (late October), weather conditions naturally suppress wildfire outbreaks, resulting in minimal to zero active wildfires across the country.
 
-Under FindFire's state machine (`INACTIVE = pd.Timedelta(days=3)` in `src/findfire/live/pipeline.py`), any tracked fire zone that receives no new satellite hotspot detections within **72 hours** is classified as `inactive`. The operational dashboard intentionally filters out inactive zones to keep responders focused exclusively on immediate threats. Consequently, running live ingestion today (`python scripts/run_live.py --once --no-mtg --firms-days 5` yielding 660 raw FIRMS detections and 9 localized zones, most inactive) correctly shows few or no active zones on the map. This reflects accurate seasonal behavior, not a defect.
+Under FindFire's state machine (`INACTIVE = pd.Timedelta(days=3)` in `src/findfire/live/pipeline.py`), any tracked fire zone that receives no new satellite hotspot detections within **72 hours** is classified as `inactive`. The dashboard hides inactive zones from the cards and the alerts and shows them in grey on the map, so responders focus on fires that are still active. Consequently, running live ingestion today (`python scripts/run_live.py --once --no-mtg --firms-days 5` yielding 660 raw FIRMS detections and 9 localized zones, most inactive) correctly shows few or no active zones on the map. This reflects accurate seasonal behavior, not a defect.
 
 ### One Unified Story: Replay & Validation Alignment
 Because an operational demonstration cannot rely on a live wildfire occurring on demo day, the system architecture feeds real archived satellite detections through the exact same production pipeline:
@@ -29,7 +29,7 @@ All values below are benchmarked on the August 2021 Kabylie wildfire complex (EM
 
 | Metric | Measured Value / Range | Baseline / Reference | Method / Evaluation Source | Notes |
 |---|---|---|---|---|
-| **Precision** | **63.0% – 70.0%** (mean: 67.6%) | Copernicus EMS EMSR533 ground truth | Overlap of cumulative sum of VIIRS zones with CEMS optical burn scar | Precision increases as fire perimeter consolidates. |
+| **Precision** | **63.0% – 70.0%** (mean: 67.6%) | Copernicus EMS EMSR533 ground truth | Overlap of cumulative sum of VIIRS zones with CEMS optical burn scar | Rises from 0.63 to 0.69 between 12 and 14 Aug. |
 | **Recall** | **65.0% – 66.0%** (mean: 65.8%) | Copernicus EMS EMSR533 ground truth | Share of reference CEMS burned scar covered by sum of tracked zones | Uniform across all 5 Copernicus monitoring products. |
 | **IoU (Jaccard Index)** | **0.47 – 0.51** (mean: 0.50) | Copernicus EMS EMSR533 ground truth | Intersection over Union (\(\frac{Z \cap R}{Z \cup R}\)) | Geometric agreement between zone footprints and optical scar. |
 | **Alert Lead Time** | **Not measured: no MTG data in 2021.** | Polar VIIRS pass (~12 h cycle) | Evaluated on 2021 historical event | MTG-I1 launched in December 2022; no operational MTG data exists for August 2021. |
@@ -119,7 +119,7 @@ Raw satellite detections frequently detect industrial heat sources (oil & gas fl
 
 ## 7. How to Reproduce the Validation Results
 
-To run the validation suite against the August 2021 Kabylie ground truth:
+To run the validation suite against the August 2021 Kabylie ground truth. It needs the EMSR533 vector packages unzipped under `data/emsr533/` (not in git, free download from the activation page) and the FIRMS archive file in `data/archive/`:
 
 ```bash
 # 1. Run the EMSR533 comparison script
