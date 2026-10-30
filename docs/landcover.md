@@ -17,27 +17,27 @@ Code: `src/findfire/landcover/worldcover.py`. Scripts: `scripts/landcover_zones.
 
 A map built from imagery of year Y can already contain the burn scars of fires that happened in Y, and a fresh scar is mapped as `bare` / sparse vegetation. What is wanted is the land **before** the fire, so each fire uses the latest map from a year before it (`year_for(date)` in `worldcover.py`):
 
-| Fire date | Map used | Why |
-|---|---|---|
-| Aug 2021 (Kabylie, the EMSR533 validation) | **2020, v100** | 2021 already contains the scars |
-| Live fires (2026) | **2021, v200** | the newest map before the fire |
-| 2020 or earlier | none | `year_for` raises: no map predates the fire |
+| Fire date                                  | Map used       | Why                                         |
+| ------------------------------------------ | -------------- | ------------------------------------------- |
+| Aug 2021 (Kabylie, the EMSR533 validation) | **2020, v100** | 2021 already contains the scars             |
+| Live fires (2026)                          | **2021, v200** | the newest map before the fire              |
+| 2020 or earlier                            | none           | `year_for` raises: no map predates the fire |
 
 The default everywhere is 2021. Pass `--year 2020` to the scripts, or `year=2020` to the functions, to use the other map.
 
-The 2020 and 2021 releases come from different algorithm versions, so **their differences are not a land-change result**: part of it is the algorithm, not the land. Do not present a 2020 vs 2021 comparison as change detection.
+The 2020 and 2021 releases come from different algorithm versions, so **their differences are not a land-change result**: part of it is the algorithm, not the land. Do not present a 2020 vs 2021 comparison as change detection [5].
 
 ## From WorldCover class to label and fuel
 
-| WorldCover code | Class | `label` | `fuel` (forecast vegetation key) |
-|---|---|---|---|
-| 10 | tree cover | `forest` | `forest` |
-| 20 | shrubland | `scrub` | `shrub` |
-| 30 | grassland | `grass` | `grass` |
-| 40 | cropland | `crop` | `null` |
-| 50 | built-up | `built-up` | `null` |
-| 60 | bare / sparse vegetation | `bare` | `null` |
-| 70, 80, 90, 95, 100 | snow and ice, permanent water, herbaceous wetland, mangroves, moss and lichen | `other` | `null` |
+| WorldCover code     | Class                                                                         | `label`    | `fuel` (forecast vegetation key) |
+| ------------------- | ----------------------------------------------------------------------------- | ---------- | -------------------------------- |
+| 10                  | tree cover                                                                    | `forest`   | `forest`                         |
+| 20                  | shrubland                                                                     | `scrub`    | `shrub`                          |
+| 30                  | grassland                                                                     | `grass`    | `grass`                          |
+| 40                  | cropland                                                                      | `crop`     | `null`                           |
+| 50                  | built-up                                                                      | `built-up` | `null`                           |
+| 60                  | bare / sparse vegetation                                                      | `bare`     | `null`                           |
+| 70, 80, 90, 95, 100 | snow and ice, permanent water, herbaceous wetland, mangroves, moss and lichen | `other`    | `null`                           |
 
 Pixels with code 0 (no data) or any code not in the table are ignored. Class codes and the tile grid are the same in both years.
 
@@ -70,18 +70,18 @@ A mixed zone (zone 13 of the same run): the top class covers less than half, so 
 
 (`fuel`, `dominant_class`, `classes`, `n_pixels`, `source` and `year` are also present in the real object.)
 
-| Field | Meaning |
-|---|---|
-| `label` | The group of the **single largest WorldCover class** under the footprint, from the table above. |
-| `fuel` | The vegetation key the fire-growth forecast understands for that largest class (`forest`, `shrub`, `grass`), or `null` for crop, built-up, bare and other. |
-| `dominant_class` | Name of the largest WorldCover class (for example `tree cover`). |
-| `dominant_share` | Share of the footprint covered by the whole `label` group, 0 to 1. For `other` this adds several classes together. |
-| `majority` | `true` when `dominant_share` is above 0.5. When `false` the zone is **mixed**: show it as mixed and do not present `label` as certain. |
-| `shares` | Share of the footprint per label group. Only groups present are listed. |
-| `classes` | Share of the footprint per WorldCover class. Only classes present are listed. |
-| `n_pixels` | Number of 10 m pixels read under the footprint. |
-| `source` | Data set name and version (for example `ESA WorldCover 2020 v100 (10 m)`). |
-| `year` | Year of the WorldCover map the label comes from (2020 or 2021). Show it next to the label so a reader knows which map was used. |
+| Field            | Meaning                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`          | The group of the **single largest WorldCover class** under the footprint, from the table above.                                                            |
+| `fuel`           | The vegetation key the fire-growth forecast understands for that largest class (`forest`, `shrub`, `grass`), or `null` for crop, built-up, bare and other. |
+| `dominant_class` | Name of the largest WorldCover class (for example `tree cover`).                                                                                           |
+| `dominant_share` | Share of the footprint covered by the whole `label` group, 0 to 1. For `other` this adds several classes together.                                         |
+| `majority`       | `true` when `dominant_share` is above 0.5. When `false` the zone is **mixed**: show it as mixed and do not present `label` as certain.                     |
+| `shares`         | Share of the footprint per label group. Only groups present are listed.                                                                                    |
+| `classes`        | Share of the footprint per WorldCover class. Only classes present are listed.                                                                              |
+| `n_pixels`       | Number of 10 m pixels read under the footprint.                                                                                                            |
+| `source`         | Data set name and version (for example `ESA WorldCover 2020 v100 (10 m)`).                                                                                 |
+| `year`           | Year of the WorldCover map the label comes from (2020 or 2021). Show it next to the label so a reader knows which map was used.                            |
 
 All shares are rounded to 4 decimals, so they add up to 1 only approximately.
 
@@ -141,26 +141,32 @@ python scripts/landcover_zones.py --state data/events/kabylie2021/state.json --y
 
 The zone `label` alone hides how sure the map is. Use the `majority` flag and `dominant_share`, grouped into tiers (the same rule `scripts/validate_landcover.py` uses):
 
-| Tier | Rule | Suggested use |
-|---|---|---|
-| confident | `majority`, `dominant_share` at least 0.7, label `crop` or `forest` | use directly |
-| likely | `majority`, any other case (grass, scrub, or a share between 0.5 and 0.7) | use, show the share |
-| mixed | `majority` is `false` | show as mixed; do not force one fuel |
-| review | label is `built-up`, `bare` or `other` | check the zone on imagery: it can be a heat source the mask missed, or a footprint that overshoots into a town |
-| unknown | `land_cover` is `null` | show "unavailable" |
+| Tier      | Rule                                                                      | Suggested use                                                                                                  |
+| --------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| confident | `majority`, `dominant_share` at least 0.7, label `crop` or `forest`       | use directly                                                                                                   |
+| likely    | `majority`, any other case (grass, scrub, or a share between 0.5 and 0.7) | use, show the share                                                                                            |
+| mixed     | `majority` is `false`                                                     | show as mixed; do not force one fuel                                                                           |
+| review    | label is `built-up`, `bare` or `other`                                    | check the zone on imagery: it can be a heat source the mask missed, or a footprint that overshoots into a town |
+| unknown   | `land_cover` is `null`                                                    | show "unavailable"                                                                                             |
+
+The tiers are checked in the order unknown, review, mixed, confident, likely. A zone whose label is `built-up`, `bare` or `other` is therefore `review` even when it is also mixed (`majority` is `false`).
 
 ## Accuracy and limits
 
-- **2021 / v200:** ESA reports an overall accuracy of **76.7 %** (independent validation by Wageningen University for statistical accuracy and IIASA for spatial accuracy). Details are in the Product Validation Report (`WorldCover_PVR_V2.0.pdf`, hosted at `pure.iiasa.ac.at`).
-- **2020 / v100:** produced with an earlier algorithm, with a lower reported overall accuracy (**74.4 %**; to be confirmed in the v100 Product Validation Report before it is quoted in the final report).
-- These figures are global averages, not a confidence for a zone.
-- A third-party study reports, citing the v200 validation, an overall accuracy of 73.6 % in Africa and, for cropland in Africa, a user's accuracy of 71.4 % and a producer's accuracy of 50.8 % (arXiv 2307.02575). So a `crop` label is right roughly 7 times in 10 in Africa, and about half of real cropland is mapped as something else. Treat these as indicative for Algeria, not exact.
-- Shrubland, grassland and bare are the classes most often confused with each other. A local assessment in Turkey found the same (Osgouei, Sertel and Kabadayi, 2023). Treat `scrub`, `grass` and `bare` as soft labels.
-- ESA's shrubland definition may include uncultivated cropland without a harvest or bare-soil period, so some `scrub` zones may be fallow fields.
+### Reported accuracy
+
+- **2021 map (v200):** overall accuracy **76.7 % (±0.5)** globally over 11 classes, validated independently by Wageningen University (statistical accuracy) and IIASA (spatial accuracy) [1][2]. For Africa: **76.5 % (±1.3)**, as reported by Digital Earth Africa [4].
+- **2020 map (v100):** produced with an earlier algorithm, **74.4 % (±0.1)** globally [1][6] and **73.6 % (±0.2)** for Africa, as reported by Digital Earth Africa [4].
+- These are global and continental averages. They are not a confidence level for a specific zone, and no Algeria-specific validation is cited here. The local check described under _Checking the labels_ is how a project-specific agreement figure is produced.
+- As summarised by Digital Earth Africa, tree cover, cropland, water and bare / sparse vegetation are among the well-mapped classes and shrubland is among the less accurate ones [4]. Grassland is not on the list of well-mapped classes. This is why only `crop` and `forest` can reach the _confident_ tier, and why `scrub` and `grass` labels are shown with their share. The class-level statement is global, not local, so the local check described under _Checking the labels_ remains the project's own evidence.
+- ESA's grassland class may include uncultivated cropland without a harvest or bare-soil period in the reference year [3]. Some `grass` zones may therefore be fallow fields.
+
+### What the label does and does not say
+
 - `dominant_share` says how the pixels under the footprint were labelled. It is not the probability that the label is right.
-- The footprint is built from 375 m pixels, so it includes land around the real fire. Land cover is computed over the footprint, not over the burned area.
-- **Burn scars:** a map of year Y can show a fire of year Y as `bare`. This is why the Aug 2021 Kabylie replay and validation use the **2020** map. The 2020 map can still show `bare` where something burned in 2020, so check `review` zones on imagery.
-- Do not compare the 2020 and 2021 maps as a change-detection result (different algorithm versions).
+- The footprint is built from 375 m VIIRS pixels, so it includes land around the real fire. Land cover is computed over the footprint, not over the burned area.
+- **Burn scars:** a map of year Y can show a fire of year Y as `bare`. This is why the Aug 2021 Kabylie replay and validation use the **2020** map. The 2020 map can still show `bare` where something burned in 2020, so zones in the _review_ tier should be checked on imagery.
+- The 2020 and 2021 maps are not a change-detection pair (different algorithm versions) [5].
 - Two vocabularies are in use: `label` says `scrub` and `built-up`, `fuel` says `shrub`. The water-demand module uses its own terrain keys (`forest`, `scrub`, `crop`, `urban`). The labels `grass`, `bare` and `other` have no terrain key there yet.
 
 ## Not connected yet
@@ -186,6 +192,15 @@ Every mixed and review zone is always included; the rest are sampled at random u
 `tests/test_landcover.py` covers tile naming, shares, majority and mixed zones, the label-to-fuel mapping, zones across a tile boundary, missing tiles and zones outside the data (they raise instead of guessing), `annotate_zones` writing `null` plus an error, the cache, and `summarise` ignoring no-data and unknown codes. For the year option it covers the v100 and v200 file names and URLs, an unknown year raising, `year_for`, each year reading its own local tile, a missing tile of the other year, the cache not mixing years, and old cache entries getting `year`.
 
 rasterio is optional for the test run: the tests that build or read tiles skip themselves when it is not installed (`pytest.importorskip`), and the others (names, URLs, `year_for`, `summarise`, the cache read) still run.
+
+## Sources
+
+1. ESA WorldCover, data access and validation statements (76.7 % for 2021, 74.4 % for 2020): https://esa-worldcover.org/en/data-access
+2. Product Validation Report v2.0 (2021 / v200): https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/docs/WorldCover_PVR_V2.0.pdf
+3. Product User Manual v2.0 (class definitions, including grassland): https://pure.iiasa.ac.at/18983/1/WorldCover_PUM_V2.0.pdf
+4. Digital Earth Africa, ESA WorldCover (Africa accuracy for 2020 and 2021, class-level summary): https://docs.digitalearthafrica.org/en/latest/data_specs/ESA_WorldCover_specs.html
+5. Zenodo record, ESA WorldCover 10 m 2021 v200 (2020 vs 2021 algorithm caveat): https://zenodo.org/records/7254221
+6. Product Validation Report v1.1 (2020 / v100): https://esa-worldcover.s3.eu-central-1.amazonaws.com/v100/2020/docs/WorldCover_PVR_V1.1.pdf
 
 ## Attribution
 
