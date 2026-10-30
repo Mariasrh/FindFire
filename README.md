@@ -1,3 +1,5 @@
+<p align=center><img src=docs/logo.png width=220 alt=FindFire></p>
+
 # FindFire
 
 Near-real-time wildfire alerts for northern Algeria from two satellites.
