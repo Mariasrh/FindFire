@@ -46,17 +46,29 @@ is not measured yet: no MTG data exists for 2021 and no fire occurred during our
 
 1. Install with Python 3.13: `python -m venv venv`, `venv\Scripts\activate`,
    `pip install -r requirements.txt`, `pip install -e .`
-2. Put the two cache files in `data/archive/`: `viirs_2021-08-08_2021-08-14.csv`
-   (FIRMS detections) and `wind_cache.json` (Open-Meteo archive winds).
-   With them the replay runs offline and needs no key. Without them the first run
-   downloads the data (needs `FIRMS_MAP_KEY` in `.env` and internet).
+2. Copy the demo data shipped in `data/demo/` into `data/archive/`:
+   `viirs_2021-08-08_2021-08-14.csv` (FIRMS detections) and `wind_cache.json` (Open-Meteo archive winds).
+   Windows: `New-Item -ItemType Directory -Force data\archive; Copy-Item data\demo\* data\archive\`. Linux or macOS: `mkdir -p data/archive && cp data/demo/* data/archive/`.
+   With them the replay runs offline and needs no key.
 3. Terminal 1: `python scripts/serve_dashboard.py --state data/live/replay_state.json --port 8010`,
    then open http://127.0.0.1:8010 and click "Enable sound".
 4. Terminal 2: `python scripts/replay_to_state.py --seconds 8`
 
+## API keys (live mode only)
+
+The replay needs no key. Live mode reads two free services; copy `.env.example` to `.env` and fill it in.
+`.env` is ignored by git: never commit a key.
+
+| Variable | Service | How to get it |
+|---|---|---|
+| `FIRMS_MAP_KEY` | NASA FIRMS (VIIRS active fires) | Free MAP_KEY requested with an e-mail address on the FIRMS website (API section) |
+| `EUMETSAT_KEY`, `EUMETSAT_SECRET` | EUMETSAT Data Store (MTG fires) | Free EUMETSAT user account, then the API key page of the Data Store |
+
+Open-Meteo (wind), OpenStreetMap (stations, basemap) and ESA WorldCover (land cover) need no key.
+
 ## Run live
 
-Needs `.env` with `FIRMS_MAP_KEY`, `EUMETSAT_KEY`, `EUMETSAT_SECRET`:
+Needs `.env` with the keys above:
 `python scripts/run_live.py --once`, then `python scripts/serve_dashboard.py --port 8010`.
 
 ## Limits
