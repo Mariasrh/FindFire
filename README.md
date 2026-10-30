@@ -2,6 +2,8 @@
 
 # FindFire
 
+**Online demo (replay, nothing to install):** https://mariasrh.github.io/FindFire/demo/
+
 Near-real-time wildfire alerts for northern Algeria from two satellites.
 Each new fire zone alerts the nearest fire station, with the water and trucks needed
 and a growth forecast. Student prototype.
