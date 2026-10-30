@@ -40,7 +40,7 @@ Real growth of the fire (EMSR533): 283 ha/h on 12-13 Aug, then 94, 20 and 15 ha/
 FIRMS near-real-time data arrive within 3 hours of the satellite pass (NASA).
 The MTG early alert is implemented and tested on real EUMETSAT data, but its lead time
 is not measured yet: no MTG data exists for 2021 and no fire occurred during our live test.
-178 automated tests: `python -m pytest tests -q`.
+194 automated tests, plus 11 that run only when the optional `rasterio` is installed: `python -m pytest tests -q`.
 
 ## Run the demo (replay of the August 2021 Kabylie fires)
 
@@ -65,24 +65,29 @@ Needs `.env` with `FIRMS_MAP_KEY`, `EUMETSAT_KEY`, `EUMETSAT_SECRET`:
   are assumptions, to be confirmed with the Civil Protection.
 - Arrival times use straight-line distance x 1.3 at 50 km/h, not road routing.
 - Severity uses the cumulative zone area, so large zones are all "critical".
+- The growth forecast uses one fixed spread rate. Compared with EMSR533, the rate the fire really
+  needed fell about 20 times between its peak and its end (one fire only), so the forecast
+  overestimates when a fire slows down. It is shown only for zones that are still spreading.
 - Zones are estimates from 375 m pixels, not measured burned areas.
   "Inactive" means no recent detection, not extinguished.
 - Very small fires can be missed. A single isolated detection does not create a zone,
   to limit false alarms.
 - OpenStreetMap coverage of fire stations is incomplete.
-- Terrain shows "forest (assumed)" until the land cover module (ESA WorldCover, in review)
-  is connected.
-- Without internet the map shows a fixed frame of the study area instead of the basemap.
+- Terrain shows "forest (assumed)": the land cover module (ESA WorldCover, `docs/landcover.md`)
+  is not yet connected to the dashboard.
+- Without internet the map is a simplified one (coastline and borders from Natural Earth)
+  instead of the OpenStreetMap basemap.
 
 ## Layout
 
-`src/findfire/` (ingestion, detection, zones, live, forecast, water, stations, dashboard),
+`src/findfire/` (ingestion, detection, zones, live, forecast, water, stations, dashboard, landcover),
 `scripts/` (entry points), `tests/`, `docs/`, `data/fire_stations.csv`.
 
 ## Data and credits
 
 NASA FIRMS (VIIRS), EUMETSAT (MTG FCI), Copernicus Emergency Management Service (EMSR533),
-Open-Meteo, OpenStreetMap contributors (ODbL), ESA WorldCover 2021 (CC BY 4.0, in review).
+Open-Meteo, OpenStreetMap contributors (ODbL), Natural Earth (public domain),
+ESA WorldCover 2020 and 2021 (CC BY 4.0).
 
 ## Team
 
