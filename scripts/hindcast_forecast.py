@@ -68,7 +68,8 @@ for s0, s1 in zip(res["snaps"][:-1], res["snaps"][1:]):
             print(f"  ...{len(rows)} zone-steps done", flush=True)
         pred = grow(z["area_ha"], wind, a.vegetation, a.step_hours * 60)["area_ha"]
         ctx.append((z["area_ha"], wind, later[z["zone_id"]]["area_ha"]))
-        rows.append(dict(zone=z["zone_id"], t=s0["time"], now=z["area_ha"], predicted=pred, observed=later[z["zone_id"]]["area_ha"]))
+        rows.append(dict(zone=z["zone_id"], t=s0["time"], now=z["area_ha"], predicted=pred, observed=later[z["zone_id"]]["area_ha"],
+                     new_hs=int(z.get("new_hotspots", 0))))
 if skipped:
     print(f"WARNING: {len(skipped)} zone-step(s) left out, no wind data (first: {skipped[0]}). Rerun to retry them.")
 d = pd.DataFrame(rows)
@@ -97,13 +98,30 @@ for name, g in d.groupby("size", observed=True):
     gr = f"{(gg.pred_growth / gg.obs_growth).median():.1f}x" if len(gg) else "n/a"
     print(f"  {name:>12}: {len(g):4d} zone-steps | median ratio {g.ratio.median():5.2f} | "
           f"growing zones: {len(gg):3d}, predicted/observed growth {gr}")
+# by FIRE STATE at the start of the step: new hotspots in the last step = still growing, none = fading.
+# This is known when the forecast is made (unlike "the zone grew", which is the answer), so it is the fair way to split.
+def _rng(x):
+    return f"{np.median(x):5.1f}x  (middle half {np.percentile(x, 25):.1f}x to {np.percentile(x, 75):.1f}x)"
+
+
+print("\nBy FIRE STATE at the start of the step (known when the forecast is made; the dashboard forecasts the growing ones):")
+for name, g in (("growing (new hotspots)", d[d.new_hs > 0]), ("fading (no new hotspots)", d[d.new_hs == 0])):
+    gg = g[g.obs_growth > 0.5]
+    print(f"  {name}: {len(g)} zone-steps, of which {len(gg)} really grew in the observed data")
+    if len(g):
+        print(f"      predicted/observed area, all steps: median {g.ratio.median():.2f}")
+    if len(gg):
+        print(f"      predicted/observed GROWTH, zones that grew: {_rng(gg.pred_growth / gg.obs_growth)}")
+        for sz, h in gg.groupby("size", observed=True):
+            print(f"          {sz:>12}: {len(h):3d} zones, {_rng(h.pred_growth / h.obs_growth)}")
+print("Reading it: 1x to 3x on the growing steps = acceptable for scenarios; much more = too fast. Fading steps are expected to be too fast.")
 print("Reading it: ratio > 1 = model grows fires too fast (lower BASE_ROS_M_MIN); < 1 = too slow.")
 print("Most zones in a quiet period stop growing, so judge the model on the growing zones and on a real wildfire event.")
 print("Observed area is a cumulative hotspot footprint, not a burned-area map: treat it as a rough reference.")
 
 if a.rate_scale:
     # the winds are already fetched, so trying other factors costs no requests
-    print("\nSCAN of the base spread rate (growing zones only; 1.0x = prediction matches observed growth):")
+    print("\nSCAN of the base spread rate (zones that grew; 1.0x = prediction matches observed growth):")
     original = dict(BASE_ROS_M_MIN)
     try:
         for f in a.rate_scale:
@@ -112,10 +130,11 @@ if a.rate_scale:
             pg = np.array([grow(area, wd, a.vegetation, a.step_hours * 60)["area_ha"] - area for area, wd, _ in ctx])
             og = np.array([obs - area for area, _, obs in ctx])
             m = og > 0.5
-            r = np.median(pg[m] / og[m]) if m.any() else float("nan")
-            big = m & (d["now"].to_numpy() > 1000)
-            rb = np.median(pg[big] / og[big]) if big.any() else float("nan")
-            print(f"  rate x{f:<5g}: all growing zones {r:6.1f}x | zones > 1000 ha {rb:6.1f}x")
+            g = d["new_hs"].to_numpy() > 0
+            rr, rg = pg[m] / og[m], pg[m & g] / og[m & g]
+            fmt = lambda x: f"{np.median(x):6.1f}x [{np.percentile(x, 25):.1f}-{np.percentile(x, 75):.1f}]" if len(x) else "   n/a"
+            print(f"  rate x{f:<5g}: growing steps {fmt(rg)} | all steps that grew {fmt(rr)}   (median [middle half])")
     finally:
         BASE_ROS_M_MIN.update(original)
     print("Remember: the hotspot footprint undercounts real growth, so do not tune to exactly 1.0x. Check against CEMS.")
+    print("If you change the speed, report a range (not one number) and say it comes from one fire only.")

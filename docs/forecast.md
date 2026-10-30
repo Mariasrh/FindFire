@@ -41,9 +41,39 @@ Measured on one event only: Kabylie, 8 to 14 August 2021, real wind of those day
 
   As expected the model is about three times worse on fading fires, because it has no notion of a fire slowing down. But the growing fires are **not** only 1x to 3x too fast: they are about 12x too fast, so the rates have to come down for them too. The spread within each group is wide (a factor of 7 between the middle-half limits), so single zone forecasts are only good to a factor of a few even after tuning.
 - Scanning the base rate (growing steps, median and middle half): x1 gives 12.2x (4.6 to 35), x0.5 gives 5.2x (1.9 to 15), x0.2 gives 1.7x (0.6 to 5.6), x0.1 gives 0.8x (0.3 to 2.7). So a factor of **about 0.1 to 0.2** matches the hotspot growth. Report it as a range, not one number, and remember it comes from **one fire only** and was fitted and scored on the same week. Because hotspots undercount real growth (next point), the true factor is probably at the upper end of the range or above it.
-- Satellite hotspots miss part of the real growth (VIIRS passes about twice a day, and a zone only grows when new hotspots are seen), so the footprint undercounts. The burned areas of the Copernicus EMSR533 activation are a better reference; they are being requested from the validation work (Anes). Until then the numbers above are rough.
+- Satellite hotspots miss part of the real growth (VIIRS passes about twice a day, and a zone only grows when new hotspots are seen). The Copernicus EMSR533 burned areas, mapped from optical satellites (Sentinel-2, SPOT 6/7), are the better reference; see the next section. Compared by date, the footprint of the largest hotspot zone (about 27,000 ha on 13 August) is roughly half of the mapped burned area (53,094 ha), assuming they are the same fire (not checked on a map).
+
 - The model grows the **whole edge** of a zone. For a zone of about 26,000 ha, a circle of that area has a perimeter of about 57 km; probably only a few km of it are really burning at a given time. So large zones are overestimated more than small ones.
 - The placeholder head rates are not absurd as head-fire speeds (observed rates in Mediterranean shrub and pine experiments reach about 14 to 20 m/min); the gap comes from holding that speed for 12 hours.
+
+## Fuel dryness: tried, not used
+Humidity and temperature were tried in the spread rate, on branch `feat/forecast-fuel-moisture` (`forecast/fuel.py`, option `--fuel`, off by default). Fuel moisture comes from the Canadian Fine Fuel Moisture Code (Van Wagner and Pickett 1985, equations 1 to 10, from Open-Meteo temperature, humidity, wind and rain of the last week), turned into a spread factor with equation 25; the Canadian wind function is left out because the model already has its own wind effect.
+
+On the Kabylie hotspot hindcast (8 to 14 August 2021, 263 zone-steps that grew) it **did not help**. The two scores below do not change when every prediction is scaled by the same factor, so they test whether the weather term tells fast from slow zones, not the overall level:
+
+| | rank correlation, predicted vs observed growth | spread of log10(predicted/observed) |
+|---|---|---|
+| without fuel | 0.38 | 0.95 |
+| with fuel | 0.14 | 1.22 |
+
+The fuel factor was between 0.36 and 8.0 (median 6.8): in that very dry week most zones got a similar, large factor, so it added noise. This is one event and a rough reference (hotspots), so it does not prove that fuel moisture never matters, and FFMC was built for Canadian pine forest. The code stays behind `--fuel`, off by default, and should only be used after it has been checked on a second event.
+
+## Check against the real burned area (Copernicus EMSR533, Kabylie)
+Anes's table of burned areas mapped on 12, 13, 14, 15 and 16 August 2021 (`docs/emsr533_burned_area.md`) gives the real growth: about 283 ha/h from 12 to 13 August (peak), then 94, 20 and 15 ha/h. `python scripts/compare_emsr533.py` starts from the area mapped on each date, grows it with the model until the next mapping, and solves for the rate factor that would match:
+
+| period | real growth (ha/h) | model x0.2 | model x0.1 | factor needed |
+|---|---|---|---|---|
+| 12 to 13 Aug | 283 | 141 | 70 | 0.39 |
+| 13 to 14 Aug | 94 | 151 | 75 | 0.12 |
+| 14 to 15 Aug | 20 | 154 | 77 | 0.03 |
+| 15 to 16 Aug | 15 | 155 | 77 | 0.02 |
+
+(Fixed wind of 4 m/s; with 2 or 7 m/s the model rates change by less than 5% and the factors do not change, because for a zone this large the wind changes the shape much more than the area. Run it without `--wind` to use the real wind of each date.)
+
+- **One fixed speed cannot fit the whole fire.** The factor needed falls by a factor of about 20 from the peak to the end. Tuned for the peak (x0.4) the model is about 20 times too fast at the end; tuned for the end (x0.02) it is about 20 times too slow at the peak. The placeholder rates (x1) are about 2.7x too fast at the peak and about 55x at the end.
+- This agrees with the hotspot hindcast, from the other side: the factor that matched the hotspot growth (0.1 to 0.2) lies between the peak value and the end values, and is lower than the peak value because hotspots undercount.
+- The cause is that the model holds one spread rate for the whole forecast and has no notion of a fire slowing down (ridges, agricultural breaks, containment, weather change). A rate that follows the fire's recent observed growth is the natural fix. First look (`compare_emsr533.py`, forecasting each period with the factor the previous period needed, fixed 4 m/s wind): predictions 302, 96 and 20 ha/h against 94, 20 and 15 observed, a typical error of 2.8x. The fixed factors on the same three periods give 27x (x1), 5.1x (x0.2) and 2.9x (x0.1). So the adaptive rate, with no tuning, does about as well as the best fixed factor, which was itself chosen by looking at this fire. It tracks a slow decline well (20 against 15 ha/h) but lags a sharp one (302 against 94 ha/h). Three periods of one fire is a first look, not a validation. For the demo, show a range and say it comes from one fire.
+- One fire, one zone: the whole mapped area (46,000 to 56,000 ha) is treated as a single circle although it may be several fires that merged.
 
 ## Sources
 - Open-Meteo forecast API (no key for non-commercial use): https://open-meteo.com/en/docs
@@ -60,7 +90,7 @@ Measured on one event only: Kabylie, 8 to 14 August 2021, real wind of those day
 | `WIND_ADJUSTMENT` | 0.4 | 10 m wind to flame-height wind |
 
 ## Limits (for the report)
-- Not a physical model: no slope, no fuel moisture, no spotting, no firefighting, wind held constant for the whole forecast.
+- Not a physical model: no slope, no fuel moisture (tried, see above: it did not help), no spotting, no firefighting, wind held constant for the whole forecast.
 - The starting shape is a circle, so the real shape of the zone is ignored.
 - One vegetation type per run: the repo has no land-cover layer yet.
 - Wind is a weather-model value, not measured at the fire.
@@ -71,4 +101,5 @@ Measured on one event only: Kabylie, 8 to 14 August 2021, real wind of those day
 - `python -m pytest -q`: formula, geometry and direction tests (published LB formula in m/s, cap at 8, head-to-back ratio).
 - `python -m pytest tests/test_forecast.py tests/test_forecast_wind.py`: model, geometry and wind selection (network calls are mocked: archive vs forecast URL, caching, fallback).
 - `python scripts/check_forecast.py`: on a real `forecast.json`, polygon area equals reported area, areas never shrink, the fire moves the way the wind pushes it, flags inactive zones and extreme growth. Proves the arithmetic, not the realism.
+- `python scripts/compare_emsr533.py`: model growth against the burned areas mapped by Copernicus EMSR533, with the rate factor needed per period (offline with `--wind SPEED FROM_DEG`).
 - `python scripts/hindcast_forecast.py --event 2021-08-08 2021-08-14 --archive-wind`: compares predicted and observed area one 12 h step later on a past event, with the wind of that date. VIIRS passes about twice a day, so 30/60/120 min forecasts cannot be scored. The result is shown separately for **growing** zones (new hotspots in the last step, known when the forecast is made) and **fading** zones (none), then by zone size. `--rate-scale 1 0.5 0.2 0.1` tries other speeds without new wind requests. See the next section for how far to trust it.
