@@ -47,4 +47,4 @@
 ## 4. Optical Ground Truth vs. Thermal Hotspots
 
 - **Optical Sensors (Sentinel-2, SPOT 6/7)**: Map the persistent charcoal and ash scar on the ground at high spatial resolution (1.5 m to 10 m). Even after active flaming subsides, the mapped scar remains visible.
-- **Thermal Hotspots (VIIRS 375 m)**: Detect instantaneous radiant heat emissions during satellite overpasses (~twice daily). Areas that burn rapidly between overpasses or smolder with lower radiative energy can be missed initially, making optical ground-truth perimeters a more reliable benchmark for measuring total cumulative growth.
+- **Thermal Hotspots (VIIRS 375 m)**: Detect instantaneous radiant heat emissions during satellite overpasses (a few per day, two VIIRS satellites in 2021). Areas that burn rapidly between overpasses or smolder with lower radiative energy can be missed initially, making optical ground-truth perimeters a more reliable benchmark for measuring total cumulative growth.
