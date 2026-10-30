@@ -16,3 +16,4 @@ data/emsr533/
 data/replay/
 *.nc
 .vscode/
+!data/demo/*.csv
