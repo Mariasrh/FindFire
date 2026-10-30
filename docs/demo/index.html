@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FindFire | Fire stations dashboard</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css">
+<style>
+  :root { --bg:#03070c; --panel:#0a1622; --panel2:#0d1c2b; --line:#16314a; --text:#eef7ff; --muted:#86a0b6;
+          --cyan:#00e5f0; --cyan2:#22d3ee; --fire:#ff5a1f; --low:#22c55e; --medium:#ffb020; --critical:#ff3b30; --accent:#00e5f0;
+          --glow:0 0 0 1px rgba(0,229,240,.22), 0 0 18px rgba(0,229,240,.10); }
+  * { box-sizing:border-box; }
+  html { color-scheme:dark; }
+  body { margin:0; min-height:100vh; font-family:"Segoe UI", system-ui, Roboto, sans-serif; color:var(--text);
+         background:radial-gradient(1100px 520px at 85% -10%, rgba(0,229,240,.10), transparent 60%), var(--bg); }
+  header { position:sticky; top:0; z-index:1000; display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; padding:10px 22px;
+           background:rgba(3,7,12,.90); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+  .brand { display:flex; align-items:center; gap:12px; margin-right:auto; }
+  .brand img { height:46px; width:auto; filter:drop-shadow(0 0 10px rgba(0,229,240,.35)); }
+  .brand h1 { margin:0; font-size:25px; font-weight:800; font-style:italic; letter-spacing:.4px; line-height:1; }
+  .brand .b1 { color:#ffffff; } .brand .b2 { color:var(--cyan); text-shadow:0 0 14px rgba(0,229,240,.45); }
+  .brand .tag { font-size:12px; color:var(--muted); margin-top:4px; letter-spacing:.3px; }
+  button, select { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 12px;
+                   font:inherit; font-size:13px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+  button:hover, select:hover { border-color:var(--cyan); box-shadow:var(--glow); }
+  #sound { border-color:rgba(0,229,240,.55); color:var(--cyan); font-weight:600; }
+  select { max-width:360px; }
+  .chk { font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .chk input { accent-color:var(--cyan); }
+  #meta { display:none; }
+  #sample { display:none; background:rgba(255,176,32,.14); color:var(--medium); border:1px solid rgba(255,176,32,.6); font-weight:700;
+            padding:5px 11px; border-radius:999px; font-size:12px; letter-spacing:.4px; }
+  #replay { display:none; background:rgba(0,229,240,.10); color:var(--cyan); border:1px solid rgba(0,229,240,.55); font-weight:700;
+            padding:5px 12px; border-radius:999px; font-size:12px; letter-spacing:.4px; }
+  #kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; padding:16px 22px 2px; }
+  .kpi { background:linear-gradient(180deg, var(--panel2), var(--panel)); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .kpi span { display:block; font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; }
+  .kpi b { display:block; font-size:26px; font-weight:800; margin-top:4px; font-variant-numeric:tabular-nums; }
+  .kpi.fire b { color:var(--fire); } .kpi.watch b { color:#e0907d; } .kpi.grey b { color:#9aa3ad; }
+  .kpi.cyan b { color:var(--cyan); } .kpi.warn b { color:var(--medium); }
+  .kpi.time b { font-size:16px; color:var(--muted); font-weight:600; margin-top:10px; }
+  #banner { display:none; margin:14px 22px 0; border-radius:12px; padding:12px 16px; font-size:15px; color:#fff;
+            background:linear-gradient(90deg, #a10f17, #ff3b30 45%, #ff7a1a); animation:pulse 2s ease-in-out infinite; }
+  #banner .row { display:flex; gap:12px; align-items:center; justify-content:space-between; margin:4px 0; }
+  #banner button { background:rgba(0,0,0,.35); border-color:rgba(255,255,255,.55); color:#fff; font-weight:700; }
+  @keyframes pulse { 0%, 100% { box-shadow:0 0 0 1px rgba(255,90,31,.5), 0 8px 26px rgba(255,59,48,.18); }
+                     50% { box-shadow:0 0 0 2px rgba(255,150,70,.9), 0 8px 38px rgba(255,59,48,.45); } }
+  @media (prefers-reduced-motion: reduce) { #banner { animation:none; } }
+  #notes { padding:0 22px; color:var(--muted); font-size:12px; }
+  #notes div { margin-top:10px; padding:8px 12px; border:1px dashed var(--line); border-radius:8px; }
+  #empty { padding:22px; color:var(--muted); display:none; }
+  #mapbox { padding:14px 22px 0; }
+  #map { height:420px; border:1px solid rgba(0,229,240,.35); border-radius:14px; background:#050b12; overflow:hidden; box-shadow:var(--glow); }
+  .leaflet-container { background:#050b12; font:inherit; }
+  .leaflet-tile-pane { filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9) saturate(.5); }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+  .leaflet-popup-content { font-size:13px; line-height:1.45; }
+  .leaflet-tooltip { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+  .leaflet-control-attribution { background:rgba(3,7,12,.75) !important; color:var(--muted) !important; }
+  .leaflet-control-attribution a { color:var(--cyan2) !important; }
+  .nomap { padding:20px; color:var(--muted); }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 20px; padding:10px 4px 0; font-size:12px; color:var(--muted); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  main { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:16px; padding:18px 22px; }
+  .card { position:relative; background:linear-gradient(180deg, var(--panel2), var(--panel)); border:1px solid var(--line);
+          border-radius:14px; padding:16px 16px 14px 21px; overflow:hidden; }
+  .card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--line); }
+  .card.sev-critical::before { background:var(--critical); } .card.sev-medium::before { background:var(--medium); }
+  .card.sev-low::before { background:var(--low); }
+  .card.new { box-shadow:0 0 0 1px rgba(255,90,31,.85), 0 0 24px rgba(255,90,31,.22); }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .top h2 { margin:0; font-size:18px; font-weight:800; }
+  .badge { padding:3px 10px; border-radius:999px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; color:#000; }
+  .low { background:var(--low); color:#04210f; } .medium { background:var(--medium); color:#2a1800; } .critical { background:var(--critical); color:#fff; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; font-size:13px; }
+  .grid span { color:var(--muted); display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; margin-bottom:2px; }
+  .grid b { font-size:15px; font-weight:700; }
+  .warn { color:var(--medium); }
+  .chg { font-size:11px; color:var(--fire); font-weight:700; margin-left:6px; }
+  .chg.zero { color:var(--muted); font-weight:500; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:12px; }
+  th, td { text-align:right; padding:5px 4px; border-top:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; }
+  .foot { margin-top:10px; font-size:11.5px; color:var(--muted); line-height:1.45; }
+  .more { grid-column:1 / -1; text-align:center; }
+  footer { margin-top:8px; padding:16px 22px 24px; color:var(--muted); font-size:12px; border-top:1px solid var(--line); }
+  @media (max-width:700px) { header { position:static; } .brand h1 { font-size:20px; } .kpi b { font-size:22px; } #map { height:320px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><img src="logo.png" alt="FindFire logo" onerror="this.remove()">
+    <div><h1><span class="b1">Find</span><span class="b2">Fire</span></h1>
+    <div class="tag">Satellite wildfire alerts for fire stations, northern Algeria</div></div></div>
+  <span id="sample">SAMPLE DATA, not real detections</span>
+  <span id="replay"></span>
+  <span id="meta">loading...</span>
+  <label class="chk"><input type="checkbox" id="onlySpreading" checked> cards and alerts: only zones still spreading</label>
+  <select id="stationSel"><option value="">All stations (command center)</option></select>
+  <button id="sound">Enable sound</button>
+</header>
+<section id="kpis"></section>
+<div id="staticnote" style="margin:12px 22px 0;padding:10px 14px;border:1px solid rgba(0,229,240,.4);border-radius:10px;color:#9fb6c8;font-size:13px;line-height:1.5">Online demo: a replay of real satellite detections of the August 2021 Kabylie fires, computed by FindFire and played in your browser (one step = 12 hours of the fire, shown every 8 seconds). Click "Enable sound" to hear the alerts. Live mode runs locally with free API keys: see the <a href="https://github.com/Mariasrh/FindFire" style="color:#00e5f0">GitHub repository</a>.</div>
+<div id="banner"></div>
+<div id="notes"></div>
+<div id="empty">No active fire zone.</div>
+<div id="mapbox"><div id="map"></div>
+  <div class="legend">
+    <span><i class="dot" style="background:#ff5a1f"></i> still spreading</span>
+    <span><i class="dot" style="background:#b34747;opacity:.5;border:1px dashed #b71c1c"></i> watch only (no new hotspot)</span>
+    <span><i class="dot" style="background:#8a8f98"></i> no longer active or merged</span>
+    <span><i class="dot" style="background:#22d3ee"></i> engaged station</span>
+    <span>white ring = alert not acknowledged | click a red dot for details</span>
+  </div>
+</div>
+<main id="cards"></main>
+<footer>
+  Water, pump and growth parameters are placeholders to be confirmed with the Protection Civile. Trucks per station
+  (3) and tank size (4000 L) are assumptions. Station positions: OpenStreetMap contributors. Estimates for comparing
+  scenarios, not an operational order.
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+// Static demo: the dashboard answers were computed in advance (steps.json). This stands in for the Python server.
+(function () {
+  var steps = null, i = 0;
+  var ready = fetch("steps.json").then(function (r) { return r.json(); }).then(function (d) { steps = d; });
+  setInterval(function () { if (steps) { i = (i + 1) % steps.length; } }, 8000);
+  var realFetch = window.fetch.bind(window);
+  window.fetch = function (url, opts) {
+    if (String(url).indexOf("/api/cards") === 0) {
+      return ready.then(function () {
+        return new Response(JSON.stringify(steps[i]), {headers: {"Content-Type": "application/json"}});
+      });
+    }
+    return realFetch(url, opts);
+  };
+})();
+</script>
+<script>
+const POLL_MS = 5000;
+let seen = null;            // zone ids already known (null until the first answer)
+let pending = [];           // new zones not acknowledged yet
+let station = "";            // selected station id, "" = command center (all stations)
+let onlySpreading = true;     // hide zones with no new hotspot in the last step
+let lastOpts = null, lastData = null, stationsById = {};
+let map = null, zoneLayer = null, stationLayer = null, lineLayer = null, fitted = false;
+let lastMapSig = null;
+let known = {};               // every zone seen since the page opened (or the replay restarted)
+let showAll = false;        // show every zone or only the first MAX_CARDS
+const MAX_CARDS = 12;
+let lastStep = null;        // replay step of the previous answer
+let audioCtx = null, soundOn = false;
+const byId = id => document.getElementById(id);
+
+function esc(value) {
+  return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, ch => (
+    {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
+}
+function num(x, digits) { return (x === null || x === undefined) ? "-" : Number(x).toLocaleString("en", {maximumFractionDigits: digits === undefined ? 0 : digits}); }
+function minutes(m) { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + " h " + (m % 60) + " min" : m + " min"; }
+
+function beep() {
+  if (!audioCtx) return;
+  [0, 0.35, 0.7].forEach(delay => {
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.frequency.value = 880; gain.gain.value = 0.2;
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(audioCtx.currentTime + delay); osc.stop(audioCtx.currentTime + delay + 0.2);
+  });
+}
+byId("sound").onclick = () => {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume(); soundOn = true;
+  byId("sound").textContent = "Sound on"; beep();
+};
+setInterval(() => { if (pending.length && soundOn) beep(); }, 8000);   // repeat until acknowledged
+function byStation(cards) {
+  return station === "" ? cards : cards.filter(c => (c.involved_station_ids || []).map(String).includes(station));
+}
+
+function mine(cards) {
+  const list = byStation(cards);
+  return onlySpreading ? list.filter(c => c.spreading !== false) : list;
+}
+
+function alertLine(c) {
+  const lead = c.lead_station || {};
+  let text = "NEW FIRE ZONE #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 1) + " ha";
+  if (station === "") {
+    text += " | alert sent to " + esc(lead.name) + (lead.eta_min === undefined ? "" : " (" + minutes(lead.eta_min) + ")");
+  } else {
+    const a = (c.assignments || []).find(x => String(x.station_id) === station);
+    text += a ? " | send " + num(a.trucks) + " truck(s) as " + esc(a.role) + ", arrival " + minutes(a.eta_min)
+              : " | your station coordinates this zone, no free truck left";
+  }
+  return text;
+}
+
+function renderBanner(cards) {
+  const box = byId("banner");
+  const live = mine(cards).filter(c => pending.includes(c.zone_id));      // cards come sorted: most severe first
+  if (!live.length) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const rows = live.slice(0, 3).map(c => '<div class="row"><strong>' + alertLine(c) + "</strong></div>").join("");
+  const more = live.length > 3 ? '<div class="row"><span>+ ' + (live.length - 3) + " more new zone(s)</span></div>" : "";
+  box.innerHTML = rows + more + '<div class="row"><span></span><button id="ackAll">Acknowledge all (' + live.length + ")</button></div>";
+  byId("ackAll").onclick = () => { pending = []; renderBanner(cards); };
+}
+
+function showLines(c) {
+  if (!lineLayer) return;
+  lineLayer.clearLayers();
+  (c.assignments || []).forEach(a => {
+    const s = stationsById[a.station_id];
+    if (!s) return;
+    L.polyline([[s.latitude, s.longitude], [c.latitude, c.longitude]],
+      {color: a.role === "lead" ? "#22d3ee" : "#9aa0a6", weight: 2, dashArray: a.role === "lead" ? null : "4 4"}).addTo(lineLayer);
+  });
+}
+
+
+const OFFLINE_LAND = [   // land of the study area, Natural Earth 1:10m (public domain), about 1 km
+  [
+    [-1.96,35.08],[-1.81,35.13],[-1.76,35.13],[-1.71,35.17],[-1.64,35.19],[-1.51,35.3],[-1.36,35.32],[-1.27,35.39],[-1.18,35.58],[-1.15,35.58],
+    [-1.03,35.68],[-0.92,35.73],[-0.89,35.72],[-0.8,35.77],[-0.71,35.74],[-0.69,35.72],[-0.63,35.72],[-0.59,35.74],[-0.58,35.77],[-0.52,35.78],
+    [-0.48,35.86],[-0.48,35.89],[-0.42,35.88],[-0.35,35.91],[-0.3,35.88],[-0.3,35.84],[-0.29,35.83],[-0.15,35.79],[-0.08,35.79],[0.03,35.86],
+    [0.13,36.05],[0.22,36.12],[0.32,36.16],[0.34,36.21],[0.45,36.22],[0.64,36.33],[0.75,36.34],[0.86,36.38],[0.93,36.42],[0.95,36.45],
+    [1.04,36.49],[1.27,36.52],[1.35,36.54],[1.45,36.53],[1.76,36.56],[1.97,36.56],[2.35,36.64],[2.39,36.62],[2.4,36.6],[2.45,36.59],
+    [2.6,36.6],[2.79,36.69],[2.85,36.75],[2.93,36.81],[3.01,36.81],[3.14,36.74],[3.21,36.76],[3.23,36.81],[3.34,36.78],[3.48,36.78],
+    [3.65,36.82],[3.74,36.89],[3.87,36.92],[3.95,36.89],[4.1,36.88],[4.16,36.9],[4.21,36.89],[4.26,36.91],[4.32,36.9],[4.44,36.91],
+    [4.55,36.88],[4.79,36.9],[5.01,36.82],[5.05,36.79],[5.1,36.78],[5.09,36.72],[5.24,36.65],[5.3,36.64],[5.46,36.67],[5.55,36.71],
+    [5.59,36.77],[5.73,36.83],[5.87,36.82],[6.2,36.9],[6.26,36.95],[6.27,37.02],[6.34,37.07],[6.42,37.09],[6.46,37.09],[6.54,37.06],
+    [6.6,36.97],[6.82,36.95],[6.91,36.89],[6.98,36.89],[7.09,36.93],[7.16,36.91],[7.25,36.99],[7.25,37.02],[7.18,37.08],[7.22,37.09],
+    [7.27,37.07],[7.29,37.08],[7.34,37.07],[7.38,37.08],[7.4,37.05],[7.46,37.04],[7.49,37.05],[7.59,36.99],[7.67,36.99],[7.71,36.96],
+    [7.77,36.97],[7.8,36.99],[7.77,36.93],[7.79,36.92],[7.77,36.89],[7.87,36.85],[7.91,36.85],[8.05,36.88],[8.23,36.96],[8.29,36.93],
+    [8.5,36.91],[8.5,34.0],[-2.0,34.0],[-2.0,35.08],[-1.96,35.08]
+  ],
+  [
+    [-1.45,37.49],[-1.5,37.43],[-1.52,37.43],[-1.62,37.39],[-1.68,37.35],[-1.73,37.28],[-1.81,37.21],[-1.86,37.08],[-1.91,36.99],[-1.9,36.94],
+    [-2.0,36.89],[-2.0,37.5],[-1.43,37.5],[-1.45,37.49]
+  ],
+];
+const OFFLINE_COAST = [   // coastline only (the frame edges are not coast)
+  [
+    [-2.0,35.08],[-1.96,35.08],[-1.81,35.13],[-1.76,35.13],[-1.71,35.17],[-1.64,35.19],[-1.51,35.3],[-1.36,35.32],[-1.27,35.39],[-1.18,35.58],
+    [-1.15,35.58],[-1.03,35.68],[-0.92,35.73],[-0.89,35.72],[-0.8,35.77],[-0.71,35.74],[-0.69,35.72],[-0.63,35.72],[-0.59,35.74],[-0.58,35.77],
+    [-0.52,35.78],[-0.48,35.86],[-0.48,35.89],[-0.42,35.88],[-0.35,35.91],[-0.3,35.88],[-0.3,35.84],[-0.29,35.83],[-0.15,35.79],[-0.08,35.79],
+    [0.03,35.86],[0.13,36.05],[0.22,36.12],[0.32,36.16],[0.34,36.21],[0.45,36.22],[0.64,36.33],[0.75,36.34],[0.86,36.38],[0.93,36.42],
+    [0.95,36.45],[1.04,36.49],[1.27,36.52],[1.35,36.54],[1.45,36.53],[1.76,36.56],[1.97,36.56],[2.35,36.64],[2.39,36.62],[2.4,36.6],
+    [2.45,36.59],[2.6,36.6],[2.79,36.69],[2.85,36.75],[2.93,36.81],[3.01,36.81],[3.14,36.74],[3.21,36.76],[3.23,36.81],[3.34,36.78],
+    [3.48,36.78],[3.65,36.82],[3.74,36.89],[3.87,36.92],[3.95,36.89],[4.1,36.88],[4.16,36.9],[4.21,36.89],[4.26,36.91],[4.32,36.9],
+    [4.44,36.91],[4.55,36.88],[4.79,36.9],[5.01,36.82],[5.05,36.79],[5.1,36.78],[5.09,36.72],[5.24,36.65],[5.3,36.64],[5.46,36.67],
+    [5.55,36.71],[5.59,36.77],[5.73,36.83],[5.87,36.82],[6.2,36.9],[6.26,36.95],[6.27,37.02],[6.34,37.07],[6.42,37.09],[6.46,37.09],
+    [6.54,37.06],[6.6,36.97],[6.82,36.95],[6.91,36.89],[6.98,36.89],[7.09,36.93],[7.16,36.91],[7.25,36.99],[7.25,37.02],[7.18,37.08],
+    [7.22,37.09],[7.27,37.07],[7.29,37.08],[7.34,37.07],[7.38,37.08],[7.4,37.05],[7.46,37.04],[7.49,37.05],[7.59,36.99],[7.67,36.99],
+    [7.71,36.96],[7.77,36.97],[7.8,36.99],[7.77,36.93],[7.79,36.92],[7.77,36.89],[7.87,36.85],[7.91,36.85],[8.05,36.88],[8.23,36.96],
+    [8.29,36.93],[8.49,36.91]
+  ],
+  [
+    [-1.45,37.49],[-1.45,37.49],[-1.5,37.43],[-1.52,37.43],[-1.62,37.39],[-1.68,37.35],[-1.73,37.28],[-1.81,37.21],[-1.86,37.08],[-1.91,36.99],
+    [-1.9,36.94],[-2.0,36.89]
+  ],
+];
+const OFFLINE_BORDERS = [   // land borders (Morocco, Tunisia), Natural Earth 1:50m (public domain)
+  [
+    [7.5,34.0],[7.51,34.08],[7.55,34.12],[7.75,34.25],[7.84,34.41],[8.12,34.56],[8.25,34.73],[8.28,34.98],[8.31,35.08],[8.39,35.2],
+    [8.32,35.4],[8.33,35.58],[8.32,35.65],[8.25,35.8],[8.25,35.87],[8.35,36.37],[8.33,36.42],[8.3,36.46],[8.21,36.5],[8.21,36.52],
+    [8.37,36.63],[8.44,36.76],[8.5,36.78]
+  ],
+  [
+    [-1.69,34.0],[-1.71,34.18],[-1.79,34.37],[-1.73,34.47],[-1.74,34.5],[-1.82,34.56],[-1.85,34.61],[-1.79,34.72],[-1.8,34.75],[-2.0,34.89]
+  ],
+];
+const FALLBACK_BOX = [-2.0, 34.0, 8.5, 37.5];           // the study area (west, south, east, north): a fixed frame
+const TOWNS = [["Oran", 35.70, -0.63], ["Algiers", 36.75, 3.06], ["Tizi Ouzou", 36.71, 4.05], ["Bejaia", 36.75, 5.08],
+               ["Setif", 36.19, 5.41], ["Constantine", 36.37, 6.61], ["Annaba", 36.90, 7.76]];
+
+function drawFallback(cards) {
+  const el = byId("map");
+  const [w, s, e, n] = FALLBACK_BOX, W = 900, H = 380;
+  const k = Math.cos((s + n) / 2 * Math.PI / 180);       // a degree of longitude is shorter than a degree of latitude
+  const scale = Math.min((W - 40) / ((e - w) * k), (H - 40) / (n - s));
+  const sx = lon => (20 + (lon - w) * k * scale).toFixed(1), sy = lat => (20 + (n - lat) * scale).toFixed(1);
+  const parts = [];
+  OFFLINE_LAND.forEach(r => parts.push('<polygon points="' + r.map(q => sx(q[0]) + ',' + sy(q[1])).join(' ')
+    + '" fill="#0d1d2b"></polygon>'));
+  OFFLINE_COAST.forEach(l => parts.push('<polyline points="' + l.map(q => sx(q[0]) + ',' + sy(q[1])).join(' ')
+    + '" fill="none" stroke="#1e6a8c" stroke-width="1.3"></polyline>'));
+  OFFLINE_BORDERS.forEach(l => parts.push('<polyline points="' + l.map(q => sx(q[0]) + ',' + sy(q[1])).join(' ')
+    + '" fill="none" stroke="#3a6f8f" stroke-width="1" stroke-dasharray="4 3"></polyline>'));
+  TOWNS.forEach(([name, lat, lon]) => parts.push('<rect x="' + sx(lon) + '" y="' + sy(lat) + '" width="4" height="4" fill="#5f6368"></rect>'
+    + '<text x="' + (Number(sx(lon)) + 6) + '" y="' + (Number(sy(lat)) + 4) + '" fill="#5f6368" font-size="11">' + name + "</text>"));
+  const activeIds = new Set(cards.map(c => c.zone_id));
+  if (station === "") {
+    Object.values(known).filter(k2 => !activeIds.has(k2.zone_id)).forEach(g => parts.push('<circle cx="' + sx(g.longitude) + '" cy="' + sy(g.latitude)
+      + '" r="3.5" fill="#8a8f98" fill-opacity="0.5" stroke="#555555"><title>Zone #' + esc(g.zone_id) + ": no recent detection or merged</title></circle>"));
+  }
+  ((lastData && lastData.stations) || []).forEach(st => {
+    if (station !== "" && String(st.id) !== station) return;
+    parts.push('<circle cx="' + sx(st.longitude) + '" cy="' + sy(st.latitude) + '" r="3" fill="#22d3ee" stroke="#0b3d91"><title>' + esc(st.name) + "</title></circle>");
+  });
+  cards.forEach(c => {
+    const watch = c.spreading === false, fresh = pending.includes(c.zone_id);
+    parts.push('<circle cx="' + sx(c.longitude) + '" cy="' + sy(c.latitude) + '" r="' + Math.max(4, Math.min(16, 2 + 3 * Math.log10(Math.max(c.area_ha, 1)))).toFixed(1)
+      + '" fill="' + (watch ? "#b34747" : "#ff5a1f") + '" fill-opacity="' + (watch ? 0.35 : 0.75) + '" stroke="' + (fresh ? "#ffffff" : "#7f0000")
+      + '" stroke-width="' + (fresh ? 2 : 1) + '"' + (watch ? ' stroke-dasharray="3 3"' : "") + "><title>Zone #" + esc(c.zone_id) + " | " + esc(c.severity)
+      + " | " + num(c.area_ha, 0) + " ha" + (watch ? " | watch only" : "") + "</title></circle>");
+  });
+  el.innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="100%" style="background:#0b0d12">' + parts.join("")
+    + '<text x="12" y="' + (H - 10) + '" fill="#9aa0a6" font-size="12">Offline map: coastline and borders from Natural Earth (public domain). Hover a dot for its zone.</text></svg>';
+}
+
+
+function popupHtml(c) {
+  const lead = c.lead_station || {};
+  const rows = (c.assignments || []).slice(0, 6).map(a => "<li>" + esc(a.station) + ": " + num(a.trucks) + " truck(s), arrival "
+    + minutes(a.eta_min) + " (" + esc(a.role) + ")</li>").join("");
+  const change = c.area_change_ha === null || c.area_change_ha === undefined ? ""
+    : " (" + (c.area_change_ha > 0 ? "+" : "") + num(c.area_change_ha, 1) + " ha since last update)";
+  const arrival = c.flow_at_arrival_l_min === undefined ? "" : ", " + num(c.flow_at_arrival_l_min) + " L/min when the first truck arrives (in " + minutes(c.arrival_min) + ")";
+  const missing = c.needs_reinforcement ? " <b>missing " + num(c.unmet_trucks) + ", ask mutual aid</b>" : "";
+  return "<b>Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + "</b><br>" + num(c.area_ha, 1) + " ha" + change
+    + "<br>Water: " + num(c.flow_l_min) + " L/min now" + arrival
+    + "<br>Alert sent to: " + esc(lead.name || c.nearest_station)
+    + "<br>Trucks: " + num(c.trucks_sent) + " sent of " + num(c.trucks_needed_now) + " needed" + missing
+    + (rows ? "<ul>" + rows + "</ul>" : "");
+}
+
+function drawMap(cards, data) {
+  if (typeof L === "undefined") { drawFallback(cards); return; }
+  if (!map) {
+    map = L.map("map").setView([36.4, 4.0], 7);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"}).addTo(map);
+    zoneLayer = L.layerGroup().addTo(map); stationLayer = L.layerGroup().addTo(map); lineLayer = L.layerGroup().addTo(map);
+  }
+  zoneLayer.clearLayers(); stationLayer.clearLayers(); lineLayer.clearLayers();
+  (data.stations || []).forEach(s => {
+    if (station !== "" && String(s.id) !== station) return;
+    L.circleMarker([s.latitude, s.longitude], {radius: 4, color: "#0b3d91", weight: 1, fillColor: "#22d3ee", fillOpacity: 0.9})
+      .bindTooltip(esc(s.name) + " | " + s.zones + " zone(s), " + s.trucks + " truck(s)").addTo(stationLayer);
+  });
+  const activeIds = new Set(cards.map(c => c.zone_id));
+  if (station === "") {                                  // zones seen earlier that are no longer active stay on the map
+    Object.values(known).filter(k => !activeIds.has(k.zone_id)).forEach(k => {
+      L.circleMarker([k.latitude, k.longitude], {radius: 4, color: "#555555", weight: 1, fillColor: "#8a8f98", fillOpacity: 0.5})
+        .bindTooltip("Zone #" + esc(k.zone_id) + ": no recent detection, or merged into a larger zone (last seen " + num(k.area_ha, 0) + " ha)")
+        .addTo(zoneLayer);
+    });
+  }
+  cards.forEach(c => {
+    const fresh = pending.includes(c.zone_id);
+    const watch = c.spreading === false;
+    const radius = Math.max(5, Math.min(22, 3 + 3 * Math.log10(Math.max(c.area_ha, 1))));
+    L.circleMarker([c.latitude, c.longitude], {radius: radius, color: fresh ? "#ffffff" : watch ? "#b71c1c" : "#7f0000",
+      weight: fresh ? 3 : 1, dashArray: watch ? "3 3" : null, fillColor: watch ? "#b34747" : "#ff5a1f", fillOpacity: watch ? 0.35 : 0.75})
+      .bindTooltip("Zone #" + esc(c.zone_id) + " | " + esc(c.severity) + " | " + num(c.area_ha, 0) + " ha" + (watch ? " | watch only" : " | click: details"))
+      .bindPopup(typeof popupHtml === "function" ? popupHtml(c) : "Zone #" + esc(c.zone_id), {maxWidth: 340})
+      .on("click", () => showLines(c)).addTo(zoneLayer);
+  });
+  if (!fitted && cards.length) { map.fitBounds(L.latLngBounds(cards.map(c => [c.latitude, c.longitude])).pad(0.2), {maxZoom: 9}); fitted = true; }
+}
+
+function areaChange(c) {
+  if (c.area_change_ha === null || c.area_change_ha === undefined) return "";
+  if (c.area_change_ha === 0) return ' <small class="chg zero">no change</small>';
+  return ' <small class="chg">' + (c.area_change_ha > 0 ? "+" : "") + num(c.area_change_ha, 1) + " ha since last update</small>";
+}
+
+function card(c) {
+  const isNew = pending.includes(c.zone_id);
+  const lead = c.lead_station || {};
+  const reinforce = c.needs_reinforcement
+    ? '<b class="warn">yes: ' + num(c.unmet_trucks) + ' trucks missing, ask mutual aid</b>' : "<b>no</b>";
+  const parts = (c.assignments || []).map(a => esc(a.station) + " x" + num(a.trucks) + " (" + minutes(a.eta_min) + ")");
+  const trucks = parts.length ? parts.slice(0, 4).join(", ") + (parts.length > 4 ? " + " + (parts.length - 4) + " more" : "") : "no free truck in range";
+  const noForecast = c.spreading === false ? "No forecast: no new hotspot in the last step, the zone is not spreading."
+                                           : "No forecast available.";
+  const fc = (c.forecast || []).length
+    ? '<table><tr><th>Forecast</th><th>Area (ha)</th><th>Severity</th><th>Water (L/min)</th></tr>'
+      + c.forecast.map(s => "<tr><td>+" + esc(s.minutes) + " min</td><td>" + num(s.area_ha, 1) + '</td><td><span class="badge '
+        + esc(s.severity) + '">' + esc(s.severity) + "</span></td><td>" + num(s.flow_l_min) + "</td></tr>").join("") + "</table>"
+    : '<div class="foot">' + noForecast + "</div>";
+  const wind = c.wind ? " Wind " + num(c.wind.speed_ms, 1) + " m/s from " + num(c.wind.from_deg) + " deg." : "";
+  const hot = c.new_hotspots === null || c.new_hotspots === undefined ? "" : " New hotspots in the last step: " + num(c.new_hotspots) + ".";
+  return '<div class="card sev-' + esc(c.severity) + (isNew ? " new" : "") + '">'
+    + '<div class="top"><h2>Zone #' + esc(c.zone_id) + '</h2><span class="badge ' + esc(c.severity) + '">' + esc(c.severity) + "</span></div>"
+    + '<div class="grid">'
+    + "<div><span>Area now</span><b>" + num(c.area_ha, 1) + " ha</b>" + areaChange(c) + "</div>"
+    + "<div><span>Status</span><b>" + esc(c.status) + "</b></div>"
+    + "<div><span>Water flow</span><b>" + num(c.flow_l_min) + " L/min</b></div>"
+    + "<div><span>Water needed on arrival" + (c.arrival_min === undefined ? "" : " (in " + minutes(c.arrival_min) + ")") + "</span><b>"
+      + num(c.flow_at_arrival_l_min === undefined ? c.flow_l_min : c.flow_at_arrival_l_min) + " L/min</b></div>"
+    + "<div><span>" + (c.monitoring ? "Nearest station (no alert)" : "Alert sent to (lead station)") + "</span><b>" + esc(lead.name || c.nearest_station) + "</b></div>"
+    + "<div><span>Distance / arrival</span><b>" + num(lead.distance_km === undefined ? c.nearest_distance_km : lead.distance_km, 1) + " km / "
+    + minutes(lead.eta_min === undefined ? c.nearest_eta_min : lead.eta_min) + "</b></div>"
+    + "<div><span>Trucks needed on arrival</span><b>" + num(c.trucks_needed_now) + " (sent " + num(c.trucks_sent) + ")</b></div>"
+    + "<div><span>Last truck arrives</span><b>" + minutes(c.eta_last_truck_min) + "</b></div>"
+    + "<div><span>Tank autonomy</span><b>" + num(c.autonomy_min, 1) + " min</b></div>"
+    + "<div><span>Reinforcement</span>" + reinforce + "</div>"
+    + "<div><span>Response</span><b>" + (c.monitoring ? "watch only: no new hotspot, no truck engaged" : c.trucks_sent > 0 ? "dispatched automatically, " + num(c.trucks_sent) + " truck(s) en route" : "no truck available in range") + "</b></div>"
+    + "<div><span>First truck arrives</span><b>" + ((c.assignments || []).length ? minutes(Math.min(...c.assignments.map(a => a.eta_min))) : "-") + "</b></div>"
+    + "</div>"
+    + '<div class="foot">Trucks from: ' + trucks + "</div>" + fc
+    + '<div class="foot">Terrain: ' + esc(c.terrain) + (c.terrain_assumed ? " (assumed)" : "") + ". Position "
+    + num(c.latitude, 4) + ", " + num(c.longitude, 4) + "." + hot + wind + "</div></div>";
+}
+
+function render(data) {
+  lastData = data;
+  const all = data.cards || [];
+  const ids = all.filter(c => c.spreading !== false).map(c => c.zone_id);      // only zones still spreading raise alerts
+  const step = data.replay ? data.replay.step : null;
+  if (step !== null && lastStep !== null && step < lastStep) { seen = new Set(); pending = []; known = {}; }   // replay restarted
+  lastStep = step;
+  all.forEach(c => { known[c.zone_id] = {zone_id: c.zone_id, latitude: c.latitude, longitude: c.longitude, area_ha: c.area_ha}; });
+  if (seen === null) { seen = new Set(ids); }                     // first answer: no alert for what already exists
+  else {
+    let fresh = false;
+    ids.forEach(id => { if (!seen.has(id)) { seen.add(id); pending.push(id); fresh = true; } });
+    if (fresh && soundOn) beep();
+  }
+  pending = pending.filter(id => ids.includes(id));               // merged or inactive zones are no longer alerts
+  stationsById = {};
+  (data.stations || []).forEach(s => { stationsById[s.id] = s; });
+  const sel = byId("stationSel");
+  const opts = '<option value="">All stations (command center)</option>' + (data.stations || []).map(s =>
+    '<option value="' + esc(s.id) + '"' + (String(s.id) === station ? " selected" : "") + ">" + esc(s.name) + " (" + s.zones + " zone(s), "
+    + s.trucks + " truck(s))</option>").join("");
+  if (opts !== lastOpts) { sel.innerHTML = opts; lastOpts = opts; }
+  const cards = mine(all);
+  byId("sample").style.display = data.sample ? "inline-block" : "none";
+  const rp = data.replay;
+  byId("replay").style.display = rp ? "inline-block" : "none";
+  if (rp) byId("replay").textContent = "REPLAY " + String(rp.time).replace("T", " ").slice(0, 16) + " UTC, step " + rp.step + "/" + rp.steps;
+  const d = data.dispatch || {};
+  const nSpreading = all.filter(c => c.spreading !== false).length, nWatch = all.length - nSpreading;
+  const nKnown = Object.keys(known).length;
+  byId("meta").textContent = "Detected so far " + nKnown + ": " + nSpreading + " spreading, " + nWatch + " watch only, "
+    + (nKnown - all.length) + " no longer active"
+    + (d.trucks_total ? ". Trucks engaged " + d.trucks_engaged + "/" + d.trucks_total + ", zones not fully covered " + ((d.partly_served || 0) + (d.not_served || 0)) : "")
+    + ". Updated " + new Date().toLocaleTimeString();
+  byId("kpis").innerHTML = [["Detected so far", nKnown, ""], ["Spreading", nSpreading, "fire"], ["Watch only", nWatch, "watch"],
+    ["No longer active", nKnown - all.length, "grey"],
+    ["Trucks engaged", d.trucks_total ? d.trucks_engaged + " / " + d.trucks_total : "-", "cyan"],
+    ["Zones not fully covered", d.trucks_total ? (d.partly_served || 0) + (d.not_served || 0) : "-", "warn"],
+    ["Updated", new Date().toLocaleTimeString(), "time"]]
+    .map(k => '<div class="kpi ' + k[2] + '"><span>' + k[0] + "</span><b>" + k[1] + "</b></div>").join("");
+  byId("notes").innerHTML = (data.warnings || []).concat(data.errors || []).map(w => "<div>" + esc(w) + "</div>").join("");
+  byId("empty").style.display = cards.length ? "none" : "block";
+  const mapCards = byStation(all);                      // the map shows every active zone, spreading or not
+  const sig = JSON.stringify([station, step, Object.keys(known).length, mapCards.map(c => [c.zone_id, c.area_ha, c.spreading, pending.includes(c.zone_id)])]);
+  if (sig !== lastMapSig) {                              // redraw only when something changed, so a popup stays open
+    lastMapSig = sig;
+    try { drawMap(mapCards, data); } catch (err) { drawFallback(mapCards); }
+  }
+  const shown = showAll ? cards : cards.slice(0, MAX_CARDS);
+  byId("cards").innerHTML = shown.map(card).join("") + (cards.length > MAX_CARDS
+    ? '<div class="more"><button id="toggleAll">' + (showAll ? "Show only the " + MAX_CARDS + " most severe" : "Show all " + cards.length + " zones") + "</button></div>" : "");
+  const toggle = byId("toggleAll");
+  if (toggle) toggle.onclick = () => { showAll = !showAll; render(data); };
+  renderBanner(all);
+}
+
+byId("stationSel").onchange = e => { station = e.target.value; if (lastData) render(lastData); };
+byId("onlySpreading").onchange = e => { onlySpreading = e.target.checked; if (lastData) render(lastData); };
+
+async function poll() {
+  try {
+    const r = await fetch("/api/cards", {cache: "no-store"});
+    render(await r.json());
+  } catch (err) {
+    byId("notes").innerHTML = "<div>Server not reachable: " + esc(String(err)) + "</div>";
+  }
+}
+poll(); setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
